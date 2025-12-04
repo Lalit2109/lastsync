@@ -13,9 +13,6 @@ pool:
   name: 'self-hosted'
 
 variables:
-  # Comma-separated list of subscription IDs to scan
-  SubscriptionsCsv: '00000000-0000-0000-0000-000000000000'
-
   # Alert threshold in minutes
   ThresholdMinutes: 30
 
@@ -41,7 +38,6 @@ stages:
               ScriptType: 'FilePath'
               ScriptPath: 'azure-pipelines/geo-replication-monitor/check-geo-replication.ps1'
               ScriptArguments: >
-                -SubscriptionsCsv "$(SubscriptionsCsv)"
                 -ThresholdMinutes $(ThresholdMinutes)
                 -SendGridApiKey "$(SendGridApiKey)"
                 -SendGridFrom "$(SendGridFrom)"

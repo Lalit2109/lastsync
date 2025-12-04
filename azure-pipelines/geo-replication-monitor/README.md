@@ -22,8 +22,7 @@ Files:
     - Your Storage Accounts (including via private endpoints if applicable)
     - `https://api.sendgrid.com` (for email sending).
 - An **Azure Resource Manager service connection** in Azure DevOps:
-  - With at least `Reader` on monitored subscriptions.
-  - And `Storage Blob Data Reader` on monitored Storage Accounts (or their RG/subscription).
+  - With at least `Reader` role on subscriptions you want to monitor (the script auto-discovers all accessible subscriptions).
 - A **SendGrid API key** with permission to send mail.
 
 #### 2. Configure the pipeline YAML
@@ -33,10 +32,6 @@ Open `azure-pipelines-geo-replication.yml` and update:
 - `pool.name`:
   - Set to your **self-hosted agent pool name**, e.g.:
   - `name: 'SelfHosted-Infra'`
-
-- `variables.SubscriptionsCsv`:
-  - Comma-separated list of subscription IDs to scan, e.g.:
-  - `SubscriptionsCsv: 'sub-id-1,sub-id-2'`
 
 - `variables.ThresholdMinutes`:
   - Set your preferred lag threshold in minutes (e.g., `15`, `30`).
@@ -67,14 +62,15 @@ These are referenced in the YAML as `$(SendGridApiKey)`, `$(SendGridFrom)`, `$(S
 The script:
 
 - Uses the Azure context provided by the AzurePowerShell task (service connection) – **no credentials in code**.
-- For each subscription in `-SubscriptionsCsv`:
+- **Auto-discovers all accessible subscriptions** using `Get-AzSubscription` (requires Reader role on subscriptions).
+- For each discovered subscription:
   - Sets context with `Set-AzContext`.
   - Lists Storage Accounts via `Get-AzStorageAccount`.
   - Filters to RA-GRS / RA-GZRS / GZRS SKUs.
   - For each geo-replicated account:
-    - Uses `Get-AzStorageServiceStats -ServiceType Blob` to obtain:
-      - `GeoReplication.Status`
-      - `GeoReplication.LastSyncTime`
+    - Uses `Get-AzStorageAccount -IncludeGeoReplicationStats` to obtain:
+      - `GeoReplicationStats.Status`
+      - `GeoReplicationStats.LastSyncTime`
     - Computes lag in minutes vs. current UTC time.
 - Collects results into an in-memory list:
   - `SubscriptionId`, `ResourceGroup`, `StorageAccount`, `Location`, `SkuName`,

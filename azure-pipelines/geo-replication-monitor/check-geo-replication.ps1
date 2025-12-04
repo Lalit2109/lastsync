@@ -17,9 +17,6 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [string] $SubscriptionsCsv,
-
-    [Parameter(Mandatory = $true)]
     [int] $ThresholdMinutes,
 
     [Parameter(Mandatory = $true)]
@@ -51,10 +48,14 @@ if (-not (Get-Module -ListAvailable -Name Az.Storage)) {
 Import-Module Az.Accounts -ErrorAction Stop
 Import-Module Az.Storage -ErrorAction Stop
 
-$subscriptionIds = $SubscriptionsCsv.Split(",", [System.StringSplitOptions]::RemoveEmptyEntries).ForEach({ $_.Trim() })
-if (-not $subscriptionIds -or $subscriptionIds.Count -eq 0) {
-    throw "No subscription IDs provided. Set SubscriptionsCsv to a comma-separated list of subscriptions."
+# Auto-discover all accessible subscriptions
+Write-Host "Discovering all accessible subscriptions..."
+$subscriptions = Get-AzSubscription -ErrorAction Stop
+if (-not $subscriptions -or $subscriptions.Count -eq 0) {
+    throw "No subscriptions found. Ensure the service connection has Reader access to subscriptions."
 }
+$subscriptionIds = $subscriptions | ForEach-Object { $_.Id }
+Write-Host "Found $($subscriptionIds.Count) subscription(s): $($subscriptionIds -join ', ')"
 
 $nowUtc = [DateTime]::UtcNow
 
