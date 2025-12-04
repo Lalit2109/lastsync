@@ -64,12 +64,24 @@ foreach ($subId in $subscriptionIds) {
 
     $storageAccounts = Get-AzStorageAccount -ErrorAction Stop
     foreach ($sa in $storageAccounts) {
-        $sku = $sa.SkuName
-
-        # Only consider geo-replicated SKUs (adjust if you use others)
-        if ($sku -notmatch "RAGRS|RAGZRS|GZRS") {
+        # Get SKU name from the nested Sku object
+        $sku = $sa.Sku.Name
+        if (-not $sku) {
+            Write-Warning "No SKU found for account $($sa.StorageAccountName) in subscription $subId"
             continue
         }
+
+        # Only consider geo-replicated SKUs with read access to secondary
+        # RAGRS = Read-Access Geo-Redundant Storage
+        # RAGZRS = Read-Access Geo-Zone-Redundant Storage  
+        # GZRS = Geo-Zone-Redundant Storage (also has read access)
+        # Note: GRS (without RA) is NOT included as it doesn't provide LastSyncTime via blob stats API
+        if ($sku -notmatch "(?i)(RAGRS|RAGZRS|GZRS)") {
+            Write-Host "Skipping account $($sa.StorageAccountName) - SKU '$sku' is not geo-replicated with read access"
+            continue
+        }
+
+        Write-Host "Processing account $($sa.StorageAccountName) - SKU: $sku"
 
         try {
             # Use the context from the Storage Account object when possible
