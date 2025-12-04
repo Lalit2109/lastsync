@@ -57,7 +57,21 @@ In Azure DevOps, for the pipeline or a variable group:
 
 These are referenced in the YAML as `$(SendGridApiKey)`, `$(SendGridFrom)`, `$(SendGridTo)`.
 
-#### 4. Script behaviour (`check-geo-replication.ps1`)
+#### 4. Configure Log Analytics (Optional but Recommended)
+
+For dashboard visualization and long-term trend analysis:
+
+1. **Create or identify a Log Analytics workspace** (see `log-analytics-dashboard-setup.md` for details)
+2. **Get Workspace ID and Shared Key**:
+   - Workspace → **Agents management** → Copy **Workspace ID** and **Primary key**
+3. **Add pipeline variables**:
+   - `LogAnalyticsWorkspaceId` – your workspace ID
+   - `LogAnalyticsSharedKey` – your workspace primary key (mark as **secret**)
+4. **Data will be sent to** `InfraMonitoring_CL` table (generic table for future infra monitoring)
+
+See `log-analytics-dashboard-setup.md` for complete setup instructions and dashboard creation.
+
+#### 5. Script behaviour (`check-geo-replication.ps1`)
 
 The script:
 
@@ -97,7 +111,7 @@ Email format:
   - `[$Environment] Storage Geo-Replication ALERT - N accounts over X minutes` (alert mode).
   - `[$Environment] Storage Geo-Replication Status Report` (report mode).
 
-#### 5. Run schedule and costs
+#### 6. Run schedule and costs
 
 - Schedule is defined in the YAML under `schedules`:
   - Default: every hour (`cron: "0 * * * *"`).
@@ -106,14 +120,15 @@ Email format:
   - **Self-hosted agents** mean you are not paying extra for Microsoft-hosted parallel jobs time beyond your DevOps plan.
   - Storage and control-plane operations are lightweight; the primary cost is your agent VM compute, which you already own.
 
-#### 6. First-time test
+#### 7. First-time test
 
 1. Commit this folder and YAML to your repo.
 2. In Azure DevOps:
    - Create a new pipeline from `azure-pipelines/geo-replication-monitor/azure-pipelines-geo-replication.yml`.
 3. Set variables:
-   - `SubscriptionsCsv`, `ThresholdMinutes`, `Mode`, `Environment`.
+   - `ThresholdMinutes`, `Mode`, `Environment`.
    - Secrets: `SendGridApiKey`, `SendGridFrom`, `SendGridTo`.
+   - Note: Subscriptions are auto-discovered (no need to specify subscription IDs).
 4. Manually **Run** the pipeline once:
    - Verify the job uses your self-hosted agent.
    - Check logs for any Az module issues.

@@ -22,6 +22,10 @@ variables:
   # Logical environment label (shown in email subject/body)
   Environment: 'Prod'
 
+  # Optional: Log Analytics workspace for dashboard/reporting
+  # LogAnalyticsWorkspaceId: ''  # Uncomment and set if using Log Analytics
+  # LogAnalyticsSharedKey: ''    # Uncomment and set as secret if using Log Analytics
+
 stages:
   - stage: GeoReplicationMonitor
     displayName: 'Storage geo-replication monitor'
@@ -44,6 +48,8 @@ stages:
                 -SendGridTo "$(SendGridTo)"
                 -Mode "$(Mode)"
                 -Environment "$(Environment)"
+                $(if (variables['LogAnalyticsWorkspaceId']) { '-LogAnalyticsWorkspaceId "$(LogAnalyticsWorkspaceId)" ' })
+                $(if (variables['LogAnalyticsSharedKey']) { '-LogAnalyticsSharedKey "$(LogAnalyticsSharedKey)" ' })
               azurePowerShellVersion: 'LatestVersion'
               pwsh: true
 

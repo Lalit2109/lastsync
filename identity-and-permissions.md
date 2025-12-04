@@ -1,107 +1,104 @@
-### Managed Identity and permissions design
+# Identity and Permissions for Azure Pipeline
 
-This document describes the identity and RBAC configuration required for the Logic App that monitors Storage Account geo-replication.
+This document describes the identity and RBAC configuration required for the Azure Pipeline that monitors Storage Account geo-replication.
 
-#### 1. Logic App identity choice
+## Overview
 
-- Use a **system-assigned managed identity** on the Logic App.
-- This identity will be used for:
-  - ARM calls (list subscriptions, list Storage Accounts).
-  - Blob service stats calls (data-plane) where supported.
+The pipeline uses an **Azure Resource Manager service connection** in Azure DevOps. This service connection authenticates using a **service principal (SPN)** that needs specific RBAC roles to read storage account information.
 
-Steps (portal-level, not automated here):
-1. Open the Logic App resource.
-2. Enable **System assigned** managed identity.
-3. Note the **Object (principal) ID** of the managed identity.
+## Required Roles
 
-#### 2. ARM permissions (control plane)
+### 1. Reader Role (ARM Control Plane)
 
-For the ARM calls (`management.azure.com`), grant the Logic App managed identity:
+**Purpose**: List subscriptions and read Storage Account properties, including geo-replication stats.
 
-- **Role**: `Reader` at the **subscription** or **management group** scope that contains the Storage Accounts.
-  - Minimum needed for:
-    - `GET /subscriptions`
-    - `GET /subscriptions/{subscriptionId}/providers/Microsoft.Storage/storageAccounts`
-- If you want to restrict to specific resource groups:
-  - Assign `Reader` on the resource groups that contain the Storage Accounts instead of the full subscription.
+**Scope**: Each subscription you want to monitor (or at Management Group level if all subscriptions are under the same management group).
 
-RBAC assignment examples (conceptual):
-- Scope: `/subscriptions/{subscriptionId}`
-- Role: `Reader`
-- Principal: `<Logic App managed identity objectId>`
+**Assignment**:
+- Go to **Subscription** → **Access control (IAM)**
+- Click **Add** → **Add role assignment**
+- **Role**: `Reader`
+- **Assign access to**: `Service principal`
+- **Select**: Your service connection's service principal
+- Click **Review + assign**
 
-#### 3. Storage data-plane permissions (Blob service stats)
+**Minimum required for**:
+- `Get-AzSubscription` (to discover subscriptions)
+- `Get-AzStorageAccount` (to list storage accounts)
+- `Get-AzStorageAccount -IncludeGeoReplicationStats` (to get geo-replication data)
 
-The Blob service stats API is a **data-plane** operation. To call it with a managed identity, you have two main options:
+### 2. No Blob Data Access Required
 
-1. **Use Azure RBAC for Storage data-plane** (recommended):
-   - Assign one of the following roles at the Storage Account level:
-     - `Storage Blob Data Reader`
-   - Scope example:
-     - `/subscriptions/{subscriptionId}/resourceGroups/{rgName}/providers/Microsoft.Storage/storageAccounts/{accountName}`
-   - Principal: Logic App managed identity.
+**Important**: The script uses `Get-AzStorageAccount -IncludeGeoReplicationStats`, which is an **ARM (control plane) operation**, not a blob data-plane call.
 
-2. **Use a Shared Access Signature (SAS) or account key** (less preferred):
-   - Store the secret (SAS token or key) in **Azure Key Vault**.
-   - Grant the Logic App access to Key Vault via:
-     - `Key Vault Secrets User` or `Key Vault Secrets Officer`, or a custom role with `secrets/get` permission.
-   - The Logic App reads the secret and appends it to the Blob stats URI.
+**You do NOT need**:
+- ❌ `Storage Blob Data Reader` role
+- ❌ `Storage Account Contributor` role
+- ❌ Any blob data-plane permissions
 
-Recommended approach: **Azure RBAC for Storage data-plane** with `Storage Blob Data Reader`, to avoid explicit key usage.
+The `-IncludeGeoReplicationStats` parameter tells the ARM API to include geo-replication statistics in the response, so it's still a control-plane operation that only requires `Reader` role.
 
-#### 4. Key Vault integration (optional but recommended)
+## Service Connection Setup in Azure DevOps
 
-If you use any secrets (SMTP credentials, SAS tokens, or non-O365 email connectors), configure:
+1. In Azure DevOps → **Project Settings** → **Service connections**
+2. Click **Create service connection** → **Azure Resource Manager**
+3. Choose **Service principal (automatic)** or **Service principal (manual)**
+4. Select the subscription(s) and scope
+5. **Name**: e.g., `Azure-Infra-Monitoring-SPN`
+6. Click **Save**
 
-- A **Key Vault** resource per environment (e.g., dev / prod).
-- Grant the Logic App managed identity:
-  - Role: `Key Vault Secrets User` at the Key Vault scope.
-- Store secrets:
-  - `smtp-connection-string` (if applicable).
-  - Any SAS tokens or sensitive configuration not suitable as plain Logic App parameters.
+The service connection will create a service principal automatically (if using automatic) or you'll use an existing one (if using manual).
 
-In the Logic App:
-- Use the Key Vault connector or direct REST calls (with managed identity) to retrieve secrets at runtime.
+## Cross-Subscription Scenarios
 
-#### 5. Office 365 email connector permissions
+### Single Tenant, Multiple Subscriptions
 
-For sending emails via Office 365:
+- The service principal exists in one tenant
+- Assign `Reader` role **in each subscription** you want to monitor
+- The script will auto-discover all subscriptions where the SPN has access
 
-- Use the Office 365 Outlook connector.
-- Auth is typically **delegated** (user account) or **service principal**:
-  - For delegated:
-    - An administrator or service account signs in and grants connector access.
-  - For service principal:
-    - Configure an application registration and grant it Send Mail permissions, then use that connection.
+### Multi-Tenant (Rare)
 
-Security considerations:
-- Prefer a **dedicated service account** / app registration for automation, not a personal user account.
-- Limit mailbox send-as rights to what is necessary.
+- You cannot use a single service principal across tenants
+- Options:
+  - Create separate service connections per tenant
+  - Use separate pipelines per tenant
+  - Use a service principal with consent in each tenant (more complex)
 
-#### 6. Cross-subscription and multi-tenant scenarios
+## Verification
 
-- **Single tenant, multiple subscriptions**:
-  - The Logic App’s managed identity exists in one tenant.
-  - Assign necessary RBAC roles (`Reader`, `Storage Blob Data Reader`) **in each subscription** the Logic App should monitor.
+To verify permissions:
 
-- **Multi-tenant** (rare for this scenario):
-  - You cannot directly use a managed identity across tenants.
-  - You would instead:
-    - Use separate Logic Apps per tenant, or
-    - Use a service principal with consent in each tenant (more complex; not covered in the base design).
+1. **Test subscription access**:
+   ```powershell
+   Get-AzSubscription
+   ```
+   Should list all subscriptions where SPN has Reader role.
 
-#### 7. Summary of required roles
+2. **Test storage account access**:
+   ```powershell
+   Get-AzStorageAccount -ResourceGroupName <rg> -Name <account> -IncludeGeoReplicationStats
+   ```
+   Should return storage account with `GeoReplicationStats` property populated.
 
-Per monitored subscription/resource group:
-- **ARM**:
-  - `Reader` (scope: subscription or resource group).
+3. **Check in Azure Portal**:
+   - Subscription → Access control (IAM)
+   - Search for your service principal
+   - Verify `Reader` role is assigned
 
-Per monitored Storage Account:
-- **Data-plane**:
-  - `Storage Blob Data Reader` (scope: Storage Account).
+## Summary
 
-Optional:
-- **Key Vault**:
-  - `Key Vault Secrets User` (scope: Key Vault).
+**Per monitored subscription:**
+- ✅ **Reader** role (scope: subscription or resource group)
 
+**Not required:**
+- ❌ Storage Blob Data Reader
+- ❌ Storage Account Contributor
+- ❌ Any data-plane permissions
 
+## Security Best Practices
+
+1. **Principle of least privilege**: Only grant `Reader` role, nothing more
+2. **Scope appropriately**: If possible, assign at resource group level instead of subscription level
+3. **Regular audits**: Periodically review role assignments
+4. **Use separate SPNs**: Consider separate service connections for different environments (Prod vs NonProd)

@@ -33,7 +33,13 @@ param(
     [string] $Mode = "alert",
 
     [Parameter(Mandatory = $false)]
-    [string] $Environment = "Prod"
+    [string] $Environment = "Prod",
+
+    [Parameter(Mandatory = $false)]
+    [string] $LogAnalyticsWorkspaceId,
+
+    [Parameter(Mandatory = $false)]
+    [string] $LogAnalyticsSharedKey
 )
 
 Write-Host "Starting geo-replication check. Mode=$Mode ThresholdMinutes=$ThresholdMinutes Environment=$Environment"
@@ -74,72 +80,78 @@ foreach ($subId in $subscriptionIds) {
             continue
         }
 
-        # Only consider geo-replicated SKUs with read access to secondary
+        # Determine if geo-replication is enabled
         # RAGRS = Read-Access Geo-Redundant Storage
         # RAGZRS = Read-Access Geo-Zone-Redundant Storage  
-        # GZRS = Geo-Zone-Redundant Storage (also has read access)
-        # Note: GRS (without RA) is NOT included as it doesn't provide LastSyncTime via blob stats API
-        if ($sku -notmatch "(?i)(RAGRS|RAGZRS|GZRS)") {
-            Write-Host "Skipping account $($sa.StorageAccountName) - SKU '$sku' is not geo-replicated with read access"
-            continue
+        # GZRS = Geo-Zone-Redundant Storage
+        # GRS = Geo-Redundant Storage (without read access, but still geo-replicated)
+        $isGeoReplicated = $sku -match "(?i)(RAGRS|RAGZRS|GZRS|GRS)"
+        $hasReadAccess = $sku -match "(?i)(RAGRS|RAGZRS|GZRS)"
+
+        Write-Host "Processing account $($sa.StorageAccountName) - SKU: $sku (GeoReplicated: $isGeoReplicated, ReadAccess: $hasReadAccess)"
+
+        $result = [PSCustomObject]@{
+            SubscriptionId    = $subId
+            ResourceGroup     = $sa.ResourceGroupName
+            StorageAccount    = $sa.StorageAccountName
+            Location          = $sa.Location
+            SkuName           = $sku
+            IsGeoReplicated   = $isGeoReplicated
+            HasReadAccess     = $hasReadAccess
+            GeoStatus         = $null
+            LastSyncTimeUtc   = $null
+            LagMinutes        = $null
+            IsOverThreshold   = $false
+            ThresholdMinutes  = $ThresholdMinutes
+            Environment       = $Environment
         }
 
-        Write-Host "Processing account $($sa.StorageAccountName) - SKU: $sku"
-
-        try {
-            # Get geo-replication stats using the official PowerShell method
-            # Reference: https://learn.microsoft.com/en-us/azure/storage/common/last-sync-time-get?tabs=azure-powershell
-            # Requires Az.Storage module version 1.11.0 or later
-            $storageAccountWithStats = Get-AzStorageAccount -ResourceGroupName $sa.ResourceGroupName `
-                -Name $sa.StorageAccountName `
-                -IncludeGeoReplicationStats `
-                -ErrorAction Stop
-            
-            if (-not $storageAccountWithStats) {
-                Write-Warning "Failed to get storage account with stats for $($sa.StorageAccountName) in subscription $subId"
-                continue
+        # Only get geo-replication stats if it's geo-replicated with read access
+        if ($hasReadAccess) {
+            try {
+                # Get geo-replication stats using the official PowerShell method
+                # Reference: https://learn.microsoft.com/en-us/azure/storage/common/last-sync-time-get?tabs=azure-powershell
+                # Requires Az.Storage module version 1.11.0 or later
+                $storageAccountWithStats = Get-AzStorageAccount -ResourceGroupName $sa.ResourceGroupName `
+                    -Name $sa.StorageAccountName `
+                    -IncludeGeoReplicationStats `
+                    -ErrorAction Stop
+                
+                if ($storageAccountWithStats) {
+                    $geoReplicationStats = $storageAccountWithStats.GeoReplicationStats
+                    if ($geoReplicationStats) {
+                        $lastSync = $geoReplicationStats.LastSyncTime
+                        if ($lastSync) {
+                            $lagMinutes = [math]::Round(($nowUtc - $lastSync.ToUniversalTime()).TotalMinutes, 2)
+                            $isOverThreshold = $lagMinutes -gt $ThresholdMinutes
+                            
+                            $result.GeoStatus = $geoReplicationStats.Status
+                            if (-not $result.GeoStatus) {
+                                $result.GeoStatus = "Unknown"
+                            }
+                            $result.LastSyncTimeUtc = $lastSync.ToUniversalTime().ToString("u")
+                            $result.LagMinutes = $lagMinutes
+                            $result.IsOverThreshold = $isOverThreshold
+                        }
+                    }
+                }
             }
-            
-            $geoReplicationStats = $storageAccountWithStats.GeoReplicationStats
-            if (-not $geoReplicationStats) {
-                Write-Warning "No GeoReplicationStats for account $($sa.StorageAccountName) in subscription $subId"
-                continue
+            catch {
+                Write-Warning "Failed to get geo stats for account $($sa.StorageAccountName) in subscription $subId. $_"
+                $result.GeoStatus = "Error"
             }
-            
-            $lastSync = $geoReplicationStats.LastSyncTime
-            if (-not $lastSync) {
-                Write-Warning "No LastSyncTime for account $($sa.StorageAccountName) in subscription $subId"
-                continue
-            }
-
-            $lagMinutes = [math]::Round(($nowUtc - $lastSync.ToUniversalTime()).TotalMinutes, 2)
-            $isOverThreshold = $lagMinutes -gt $ThresholdMinutes
-            
-            # Get geo-replication status from GeoReplicationStats
-            $geoStatus = $geoReplicationStats.Status
-            if (-not $geoStatus) {
-                $geoStatus = "Unknown"
-            }
-
-            $result = [PSCustomObject]@{
-                SubscriptionId    = $subId
-                ResourceGroup     = $sa.ResourceGroupName
-                StorageAccount    = $sa.StorageAccountName
-                Location          = $sa.Location
-                SkuName           = $sku
-                GeoStatus         = $geoStatus
-                LastSyncTimeUtc   = $lastSync.ToUniversalTime().ToString("u")
-                LagMinutes        = $lagMinutes
-                IsOverThreshold   = $isOverThreshold
-                ThresholdMinutes  = $ThresholdMinutes
-                Environment       = $Environment
-            }
-
-            $results += $result
         }
-        catch {
-            Write-Warning "Failed to get geo stats for account $($sa.StorageAccountName) in subscription $subId. $_"
+        else {
+            # For non-geo-replicated or GRS without read access, set status
+            if ($isGeoReplicated) {
+                $result.GeoStatus = "NoReadAccess"  # GRS without RA
+            }
+            else {
+                $result.GeoStatus = "NotEnabled"  # LRS, ZRS, etc.
+            }
         }
+
+        $results += $result
     }
 }
 
@@ -155,9 +167,63 @@ if (-not $results) {
     }
 }
 
-Write-Host "Total geo-replicated accounts evaluated: $($results.Count)"
+Write-Host "Total storage accounts evaluated: $($results.Count)"
+$geoReplicatedCount = ($results | Where-Object { $_.IsGeoReplicated -eq $true }).Count
+$withReadAccessCount = ($results | Where-Object { $_.HasReadAccess -eq $true }).Count
+Write-Host "  - Geo-replicated: $geoReplicatedCount"
+Write-Host "  - With read access (monitored): $withReadAccessCount"
 
-$overThreshold = $results | Where-Object { $_.IsOverThreshold -eq $true }
+# Send data to Log Analytics if configured (optional - sends ALL accounts)
+if ($LogAnalyticsWorkspaceId -and $LogAnalyticsSharedKey -and $results.Count -gt 0) {
+    Write-Host "Preparing data for Log Analytics..."
+    
+    # Import the Log Analytics module
+    $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $logAnalyticsModule = Join-Path $scriptPath "Send-LogAnalytics.ps1"
+    if (Test-Path $logAnalyticsModule) {
+        . $logAnalyticsModule
+        
+        # Transform results to Log Analytics format (generic InfraMonitoring_CL table)
+        # Include ALL storage accounts (not just geo-replicated ones)
+        $logAnalyticsData = $results | ForEach-Object {
+            @{
+                TimeGenerated = [DateTime]::UtcNow.ToString("o")
+                ServiceType_s = "StorageGeoReplication"
+                SubscriptionId_s = $_.SubscriptionId
+                ResourceGroup_s = $_.ResourceGroup
+                ResourceName_s = $_.StorageAccount
+                ResourceType_s = "Microsoft.Storage/storageAccounts"
+                PrimaryLocation_s = $_.Location
+                SkuName_s = $_.SkuName
+                IsGeoReplicated_b = $_.IsGeoReplicated
+                HasReadAccess_b = $_.HasReadAccess
+                GeoReplicationStatus_s = if ($_.GeoStatus) { $_.GeoStatus } else { "N/A" }
+                LastSyncTime_t = if ($_.LastSyncTimeUtc) { $_.LastSyncTimeUtc } else { $null }
+                LagMinutes_d = if ($_.LagMinutes) { $_.LagMinutes } else { $null }
+                IsOverThreshold_b = $_.IsOverThreshold
+                ThresholdMinutes_d = $_.ThresholdMinutes
+                Environment_s = $_.Environment
+                RunId_s = if ($env:BUILD_BUILDID) { "$($env:BUILD_BUILDID)-$($env:BUILD_BUILDNUMBER)" } else { "manual-$(Get-Date -Format 'yyyyMMddHHmmss')" }
+            }
+        }
+        
+        $logSent = Send-ToLogAnalytics -WorkspaceId $LogAnalyticsWorkspaceId -SharedKey $LogAnalyticsSharedKey -Data $logAnalyticsData -LogType "InfraMonitoring"
+        if ($logSent) {
+            Write-Host "Data successfully sent to Log Analytics workspace ($($logAnalyticsData.Count) records)"
+        }
+    }
+    else {
+        Write-Warning "Log Analytics module not found at $logAnalyticsModule. Skipping Log Analytics upload."
+    }
+}
+else {
+    if (-not $LogAnalyticsWorkspaceId -or -not $LogAnalyticsSharedKey) {
+        Write-Host "Log Analytics not configured (WorkspaceId or SharedKey not provided). Skipping Log Analytics upload."
+    }
+}
+
+# For email alerts, only consider accounts with read access that are over threshold
+$overThreshold = $results | Where-Object { $_.HasReadAccess -eq $true -and $_.IsOverThreshold -eq $true }
 
 if ($Mode -eq "alert" -and -not $overThreshold) {
     Write-Host "Mode=alert and no accounts over threshold. No email will be sent."
@@ -179,15 +245,18 @@ function New-HtmlTable {
     $rows = ""
     foreach ($r in $Data) {
         $highlight = if ($r.IsOverThreshold) { " style='background-color:#ffcccc;'" } else { "" }
+        $geoStatus = if ($r.GeoStatus) { $r.GeoStatus } else { "N/A" }
+        $lastSync = if ($r.LastSyncTimeUtc) { $r.LastSyncTimeUtc } else { "N/A" }
+        $lagMinutes = if ($r.LagMinutes) { $r.LagMinutes.ToString("F2") } else { "N/A" }
         $rows += "<tr$highlight>" +
                  "<td>$($r.SubscriptionId)</td>" +
                  "<td>$($r.ResourceGroup)</td>" +
                  "<td>$($r.StorageAccount)</td>" +
                  "<td>$($r.Location)</td>" +
                  "<td>$($r.SkuName)</td>" +
-                 "<td>$($r.GeoStatus)</td>" +
-                 "<td>$($r.LastSyncTimeUtc)</td>" +
-                 "<td>$($r.LagMinutes)</td>" +
+                 "<td>$geoStatus</td>" +
+                 "<td>$lastSync</td>" +
+                 "<td>$lagMinutes</td>" +
                  "<td>$($r.ThresholdMinutes)</td>" +
                  "</tr>"
     }
