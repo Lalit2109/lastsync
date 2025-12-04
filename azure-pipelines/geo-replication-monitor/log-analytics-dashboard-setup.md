@@ -4,7 +4,9 @@ This guide walks you through setting up Azure Log Analytics to collect geo-repli
 
 ## Overview
 
-The PowerShell script sends monitoring data to a Log Analytics workspace using the **Data Collector API**. This data is stored in a custom table called `InfraMonitoring_CL` (the `_CL` suffix indicates a custom log). This generic table structure allows you to add other infrastructure monitoring data in the future.
+The PowerShell script sends monitoring data to a Log Analytics workspace using the **Data Collector API**. This data is stored in a custom table called `StorageGeoReplication_CL` (the `_CL` suffix indicates a custom log). This table is specifically designed for storage account geo-replication monitoring.
+
+> **Note**: If you see double suffixes in your table (like `IsGeoReplicated_b_b` instead of `IsGeoReplicated_b`), it means the schema was created incorrectly on first ingestion. The script now uses `StorageGeoReplication` to create a table with the correct schema. If you need to keep using an old table, update all queries to use the double-suffixed field names (e.g., `IsGeoReplicated_b_b`, `HasReadAccess_b_b`, `GeoReplicationStatus_s_s`).
 
 ## Step 1: Create or Identify Log Analytics Workspace
 
@@ -80,12 +82,13 @@ In Azure DevOps, configure the Log Analytics variables:
    - Go to your Log Analytics workspace → **Logs**
    - Run this query:
      ```kusto
-     InfraMonitoring_CL
+     StorageGeoReplication_CL
      | where ServiceType_s == "StorageGeoReplication"
      | take 50
      ```
    - You should see records with columns like:
      - `SubscriptionId_s`, `ResourceName_s`, `LagMinutes_d`, `IsOverThreshold_b`, etc.
+   - **Important**: Field names should have single suffixes (`_s`, `_b`, `_d`, `_t`). If you see double suffixes like `_s_s` or `_b_b`, the schema was created incorrectly. Use the new `StorageGeoReplication_CL` table instead.
 
 ## Step 5: Create KQL Queries for Dashboard Widgets
 
@@ -96,7 +99,7 @@ Here are the KQL queries for different dashboard widgets. Each widget shows a di
 **Purpose**: Shows all accounts that have geo-replication enabled, with their current lag status. Accounts over threshold are highlighted.
 
 ```kusto
-InfraMonitoring_CL
+StorageGeoReplication_CL
 | where ServiceType_s == "StorageGeoReplication"
 | where TimeGenerated > ago(1h)
 | where IsGeoReplicated_b == true
@@ -118,7 +121,7 @@ InfraMonitoring_CL
 **Purpose**: Lists all storage accounts that do NOT have geo-replication enabled.
 
 ```kusto
-InfraMonitoring_CL
+StorageGeoReplication_CL
 | where ServiceType_s == "StorageGeoReplication"
 | where TimeGenerated > ago(1h)
 | where IsGeoReplicated_b == false
@@ -135,7 +138,7 @@ InfraMonitoring_CL
 **Purpose**: Shows only accounts that are over the threshold, highlighted in red.
 
 ```kusto
-InfraMonitoring_CL
+StorageGeoReplication_CL
 | where ServiceType_s == "StorageGeoReplication"
 | where TimeGenerated > ago(1h)
 | where IsGeoReplicated_b == true
@@ -156,7 +159,7 @@ InfraMonitoring_CL
 **Purpose**: Overview counts and percentages.
 
 ```kusto
-InfraMonitoring_CL
+StorageGeoReplication_CL
 | where ServiceType_s == "StorageGeoReplication"
 | where TimeGenerated > ago(1h)
 | summarize arg_max(TimeGenerated, *) by SubscriptionId_s, ResourceName_s
@@ -181,7 +184,7 @@ InfraMonitoring_CL
 **Purpose**: Shows average lag trend for accounts with read access.
 
 ```kusto
-InfraMonitoring_CL
+StorageGeoReplication_CL
 | where ServiceType_s == "StorageGeoReplication"
 | where TimeGenerated > ago(7d)
 | where IsGeoReplicated_b == true
@@ -202,7 +205,7 @@ InfraMonitoring_CL
 **Purpose**: Visual breakdown of accounts by status.
 
 ```kusto
-InfraMonitoring_CL
+StorageGeoReplication_CL
 | where ServiceType_s == "StorageGeoReplication"
 | where TimeGenerated > ago(1h)
 | summarize arg_max(TimeGenerated, *) by SubscriptionId_s, ResourceName_s
@@ -222,7 +225,7 @@ InfraMonitoring_CL
 **Purpose**: Shows the worst-performing accounts.
 
 ```kusto
-InfraMonitoring_CL
+StorageGeoReplication_CL
 | where ServiceType_s == "StorageGeoReplication"
 | where TimeGenerated > ago(24h)
 | where IsGeoReplicated_b == true
@@ -234,6 +237,90 @@ InfraMonitoring_CL
 ```
 
 **Visualization**: Bar chart or table
+
+## Step 6: Choose Your Visualization Method
+
+Before creating your dashboard, you need to decide between **Azure Dashboard** and **Azure Workbook**. Here's a comparison to help you choose:
+
+### Azure Dashboard vs Azure Workbook
+
+#### What is Azure Dashboard?
+- **What it is**: A simple, tile-based dashboard in the Azure Portal
+- **Best for**: Quick visualizations, pinning existing charts/tiles, simple layouts
+- **How to create**: Pin queries from Log Analytics directly to a dashboard
+
+#### What is Azure Workbook?
+- **What it is**: An interactive, parameterized reporting tool with advanced features
+- **Best for**: Complex reports, interactive queries, parameters, multiple data sources, sharing with teams
+
+### Comparison Table
+
+| Feature | Azure Dashboard | Azure Workbook |
+|---------|----------------|----------------|
+| **Complexity** | Simple | More advanced |
+| **Setup Time** | Faster (5 minutes) | More setup (15-20 minutes) |
+| **Parameters** | Limited | Full support (dropdowns, time ranges, etc.) |
+| **Interactivity** | Basic | High (click-through, drill-down) |
+| **Data Sources** | Single (per tile) | Multiple in one workbook |
+| **Conditional Formatting** | Limited | Advanced |
+| **Sharing** | Portal access | Can be shared as a resource |
+| **Mobile Friendly** | Yes | Yes |
+| **Best For** | Quick overview | Detailed reports and analysis |
+
+### When to Use Each
+
+#### Use Azure Dashboard if:
+- ✅ You want a quick overview
+- ✅ You prefer simple tiles
+- ✅ You don't need parameters
+- ✅ You want to pin existing queries quickly
+- ✅ You need a simple status view
+
+#### Use Azure Workbook if:
+- ✅ You want interactive reports
+- ✅ You need parameters (time range, environment filters)
+- ✅ You want advanced formatting and conditional highlighting
+- ✅ You plan to share with teams
+- ✅ You want drill-down capabilities
+- ✅ You need multiple related visualizations in one place
+
+### Recommendation for This Use Case
+
+**We recommend using Azure Workbook** because:
+1. ✅ You have multiple related queries (summary, alerts, trends, charts)
+2. ✅ Conditional formatting helps highlight accounts over threshold
+3. ✅ Parameters let you filter by environment and time range
+4. ✅ Better for sharing with your team
+5. ✅ More flexible for future enhancements
+
+### Visual Example
+
+**Azure Dashboard:**
+```
+┌─────────┐ ┌─────────┐ ┌─────────┐
+│ Tile 1 │ │ Tile 2 │ │ Tile 3 │
+└─────────┘ └─────────┘ └─────────┘
+┌─────────┐ ┌─────────┐
+│ Tile 4 │ │ Tile 5 │
+└─────────┘ └─────────┘
+```
+
+**Azure Workbook:**
+```
+┌─────────────────────────────────────┐
+│ Parameters: [Time Range ▼] [Env ▼] │
+├─────────────────────────────────────┤
+│ Summary Stats (KPI Cards)           │
+├─────────────────────────────────────┤
+│ Table: Over Threshold (Red)         │
+├─────────────────────────────────────┤
+│ Table: All Geo-Replicated Accounts  │
+├─────────────────────────────────────┤
+│ Chart: Lag Trend Over Time          │
+└─────────────────────────────────────┘
+```
+
+---
 
 ## Step 6: Create Azure Dashboard
 
@@ -295,7 +382,7 @@ InfraMonitoring_CL
      - `TimeRange` (dropdown: Last 1 hour, Last 24 hours, Last 7 days)
    - Update queries to use parameters:
      ```kusto
-     InfraMonitoring_CL
+     StorageGeoReplication_CL
      | where ServiceType_s == "StorageGeoReplication"
      | where TimeGenerated > ago({TimeRange:value})
      | where Environment_s == "{Environment}" or "{Environment}" == "All"
@@ -306,14 +393,58 @@ InfraMonitoring_CL
    - Name: "Infra Monitoring - Storage Geo-Replication"
    - Save to: Subscription or Resource Group
 
-## Step 7: Create Alerts from Log Analytics (Optional)
+## Step 7: Understanding Field Name Suffixes
+
+### What are the Suffixes?
+
+Log Analytics uses type suffixes to determine data types in custom tables:
+- `_s` = String (text)
+- `_b` = Boolean (true/false)
+- `_d` = Double (number)
+- `_t` = DateTime (timestamp)
+
+### Double Suffix Issue
+
+If you see double suffixes in your table (like `IsGeoReplicated_b_b` instead of `IsGeoReplicated_b`), this means:
+1. The schema was created incorrectly on first ingestion
+2. Log Analytics schema is **locked** after first creation and cannot be changed
+3. The current script uses `InfraMonitoringV2` to create a new table with correct schema
+
+### Solution Options
+
+**Option 1: Use New Table (Recommended)**
+- The script now uses `StorageGeoReplication_CL` table with correct single suffixes
+- All queries in this guide use `StorageGeoReplication_CL`
+- This is the cleanest solution
+
+**Option 2: Keep Using Old Table**
+- If you want to keep using `InfraMonitoring_CL` with double suffixes:
+  1. Change the script back to use `"InfraMonitoring"` as LogType
+  2. Update all queries to use double suffixes:
+     - `IsGeoReplicated_b_b` instead of `IsGeoReplicated_b`
+     - `HasReadAccess_b_b` instead of `HasReadAccess_b`
+     - `GeoReplicationStatus_s_s` instead of `GeoReplicationStatus_s`
+     - `IsOverThreshold_b_b` instead of `IsOverThreshold_b`
+     - `LastSyncTime_t_s` instead of `LastSyncTime_t`
+
+### How to Check Your Table Schema
+
+Run this query to see all column names and types:
+```kusto
+StorageGeoReplication_CL  // or InfraMonitoring_CL for old table
+| getschema
+| project ColumnName, ColumnType
+| order by ColumnName
+```
+
+## Step 8: Create Alerts from Log Analytics (Optional)
 
 You can create alerts based on Log Analytics queries:
 
 1. In Log Analytics workspace → **Logs**
 2. Run a query that identifies issues:
    ```kusto
-   InfraMonitoring_CL
+   StorageGeoReplication_CL
    | where ServiceType_s == "StorageGeoReplication"
    | where TimeGenerated > ago(5m)
    | where IsOverThreshold_b == true
@@ -327,11 +458,11 @@ You can create alerts based on Log Analytics queries:
    - **Alert rule name**: "Storage Geo-Replication Over Threshold"
 5. Click **Create alert rule**
 
-## Step 8: Make It Generic for Future Monitoring
+## Step 9: Make It Generic for Future Monitoring
 
-The `InfraMonitoring_CL` table is designed to be generic. To add other infrastructure monitoring:
+The `StorageGeoReplication_CL` table is specifically designed for storage account geo-replication monitoring. If you want to add other infrastructure monitoring in the future:
 
-1. **Use the same table** (`InfraMonitoring_CL`)
+1. **Create separate tables** for different service types (e.g., `SqlBackup_CL`, `KeyVaultHealth_CL`)
 2. **Set `ServiceType_s`** to identify the service:
    - `"StorageGeoReplication"` (current)
    - `"SqlBackup"` (future)
@@ -365,7 +496,7 @@ The `InfraMonitoring_CL` table is designed to be generic. To add other infrastru
 
 **Query to check:**
 ```kusto
-InfraMonitoring_CL
+StorageGeoReplication_CL
 | where TimeGenerated > ago(1h)
 | count
 ```

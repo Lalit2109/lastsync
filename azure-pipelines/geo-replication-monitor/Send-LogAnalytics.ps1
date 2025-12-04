@@ -67,6 +67,3 @@ function Send-ToLogAnalytics {
     }
 }
 
-# Export the function
-Export-ModuleMember -Function Send-ToLogAnalytics
-

@@ -204,7 +204,9 @@ if ($LogAnalyticsWorkspaceId -and $LogAnalyticsSharedKey -and $results.Count -gt
             }
         }
         
-        $logSent = Send-ToLogAnalytics -WorkspaceId $LogAnalyticsWorkspaceId -SharedKey $LogAnalyticsSharedKey -Data $logAnalyticsData -LogType "InfraMonitoring"
+        # Using StorageGeoReplication to create a table with correct schema (single suffixes)
+        # This will create a table named StorageGeoReplication_CL in Log Analytics
+        $logSent = Send-ToLogAnalytics -WorkspaceId $LogAnalyticsWorkspaceId -SharedKey $LogAnalyticsSharedKey -Data $logAnalyticsData -LogType "StorageGeoReplication"
         if ($logSent) {
             Write-Host "Data successfully sent to Log Analytics workspace ($($logAnalyticsData.Count) records)"
         }
