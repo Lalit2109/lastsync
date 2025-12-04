@@ -74,13 +74,14 @@ foreach ($subId in $subscriptionIds) {
             continue
         }
 
-        # Only consider geo-replicated SKUs with read access to secondary
+        # Consider all geo-replicated SKUs (GRS, RA-GRS, GZRS, RA-GZRS)
         # RAGRS = Read-Access Geo-Redundant Storage
         # RAGZRS = Read-Access Geo-Zone-Redundant Storage  
-        # GZRS = Geo-Zone-Redundant Storage (also has read access)
-        # Note: GRS (without RA) is NOT included as it doesn't provide LastSyncTime via blob stats API
-        if ($sku -notmatch "(?i)(RAGRS|RAGZRS|GZRS)") {
-            Write-Host "Skipping account $($sa.StorageAccountName) - SKU '$sku' is not geo-replicated with read access"
+        # GZRS = Geo-Zone-Redundant Storage
+        # GRS = Geo-Redundant Storage (without read access, but still geo-replicated)
+        # All of these provide LastSyncTime via Get-AzStorageAccount -IncludeGeoReplicationStats
+        if ($sku -notmatch "(?i)(RAGRS|RAGZRS|GZRS|GRS)") {
+            Write-Host "Skipping account $($sa.StorageAccountName) - SKU '$sku' is not geo-replicated"
             continue
         }
 
