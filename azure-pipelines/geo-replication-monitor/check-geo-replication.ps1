@@ -80,13 +80,13 @@ foreach ($subId in $subscriptionIds) {
             continue
         }
 
-        # Determine if geo-replication is enabled
+        # Determine if geo-replication is enabled (all types)
         # RAGRS = Read-Access Geo-Redundant Storage
         # RAGZRS = Read-Access Geo-Zone-Redundant Storage  
         # GZRS = Geo-Zone-Redundant Storage
         # GRS = Geo-Redundant Storage (without read access, but still geo-replicated)
         $isGeoReplicated = $sku -match "(?i)(RAGRS|RAGZRS|GZRS|GRS)"
-        $hasReadAccess = $sku -match "(?i)(RAGRS|RAGZRS|GZRS)"
+        $hasReadAccess = $sku -match "(?i)(RAGRS|RAGZRS|GZRS)"  # Keep for reporting, but not used for filtering
 
         Write-Host "Processing account $($sa.StorageAccountName) - SKU: $sku (GeoReplicated: $isGeoReplicated, ReadAccess: $hasReadAccess)"
 
@@ -106,12 +106,13 @@ foreach ($subId in $subscriptionIds) {
             Environment       = $Environment
         }
 
-        # Only get geo-replication stats if it's geo-replicated with read access
-        if ($hasReadAccess) {
+        # Get geo-replication stats for ALL geo-replicated accounts (GRS, RA-GRS, GZRS, RA-GZRS)
+        if ($isGeoReplicated) {
             try {
                 # Get geo-replication stats using the official PowerShell method
                 # Reference: https://learn.microsoft.com/en-us/azure/storage/common/last-sync-time-get?tabs=azure-powershell
                 # Requires Az.Storage module version 1.11.0 or later
+                # This works for both GRS and RA-GRS accounts
                 $storageAccountWithStats = Get-AzStorageAccount -ResourceGroupName $sa.ResourceGroupName `
                     -Name $sa.StorageAccountName `
                     -IncludeGeoReplicationStats `
@@ -123,6 +124,7 @@ foreach ($subId in $subscriptionIds) {
                         $lastSync = $geoReplicationStats.LastSyncTime
                         if ($lastSync) {
                             $lagMinutes = [math]::Round(($nowUtc - $lastSync.ToUniversalTime()).TotalMinutes, 2)
+                            # Check threshold for all geo-replicated accounts
                             $isOverThreshold = $lagMinutes -gt $ThresholdMinutes
                             
                             $result.GeoStatus = $geoReplicationStats.Status
@@ -142,13 +144,8 @@ foreach ($subId in $subscriptionIds) {
             }
         }
         else {
-            # For non-geo-replicated or GRS without read access, set status
-            if ($isGeoReplicated) {
-                $result.GeoStatus = "NoReadAccess"  # GRS without RA
-            }
-            else {
-                $result.GeoStatus = "NotEnabled"  # LRS, ZRS, etc.
-            }
+            # For non-geo-replicated accounts only (LRS, ZRS, Premium_LRS, etc.)
+            $result.GeoStatus = "NotEnabled"
         }
 
         $results += $result
@@ -222,8 +219,8 @@ else {
     }
 }
 
-# For email alerts, only consider accounts with read access that are over threshold
-$overThreshold = $results | Where-Object { $_.HasReadAccess -eq $true -and $_.IsOverThreshold -eq $true }
+# For email alerts, consider all geo-replicated accounts that are over threshold
+$overThreshold = $results | Where-Object { $_.IsGeoReplicated -eq $true -and $_.IsOverThreshold -eq $true }
 
 if ($Mode -eq "alert" -and -not $overThreshold) {
     Write-Host "Mode=alert and no accounts over threshold. No email will be sent."
