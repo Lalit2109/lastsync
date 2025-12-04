@@ -11,6 +11,8 @@
       - Expected to run inside Azure Pipelines using an AzurePowerShell task
         that already logged in via an Azure Resource Manager service connection.
       - Requires Az.Accounts and Az.Storage modules on the agent.
+      - Requires Az.Storage module version 1.11.0 or later for -IncludeGeoReplicationStats parameter.
+      - Reference: https://learn.microsoft.com/en-us/azure/storage/common/last-sync-time-get?tabs=azure-powershell
 #>
 
 param(
@@ -84,24 +86,26 @@ foreach ($subId in $subscriptionIds) {
         Write-Host "Processing account $($sa.StorageAccountName) - SKU: $sku"
 
         try {
-            # Use the context from the Storage Account object when possible
-            if ($sa.Context) {
-                $ctx = $sa.Context
-            }
-            else {
-                $ctx = New-AzStorageContext -StorageAccountName $sa.StorageAccountName -UseConnectedAccount -ErrorAction Stop
-            }
-
-            # Get blob service stats (includes GeoReplication.LastSyncTime)
-            $stats = Get-AzStorageServiceStats -Context $ctx -ServiceType Blob -ErrorAction Stop
-
-            $geo = $stats.GeoReplication
-            if (-not $geo) {
-                Write-Warning "No GeoReplication info for account $($sa.StorageAccountName) in subscription $subId"
+            # Get geo-replication stats using the official PowerShell method
+            # Reference: https://learn.microsoft.com/en-us/azure/storage/common/last-sync-time-get?tabs=azure-powershell
+            # Requires Az.Storage module version 1.11.0 or later
+            $storageAccountWithStats = Get-AzStorageAccount -ResourceGroupName $sa.ResourceGroupName `
+                -Name $sa.StorageAccountName `
+                -IncludeGeoReplicationStats `
+                -ErrorAction Stop
+            
+            if (-not $storageAccountWithStats) {
+                Write-Warning "Failed to get storage account with stats for $($sa.StorageAccountName) in subscription $subId"
                 continue
             }
-
-            $lastSync = $geo.LastSyncTime
+            
+            $geoReplicationStats = $storageAccountWithStats.GeoReplicationStats
+            if (-not $geoReplicationStats) {
+                Write-Warning "No GeoReplicationStats for account $($sa.StorageAccountName) in subscription $subId"
+                continue
+            }
+            
+            $lastSync = $geoReplicationStats.LastSyncTime
             if (-not $lastSync) {
                 Write-Warning "No LastSyncTime for account $($sa.StorageAccountName) in subscription $subId"
                 continue
@@ -109,6 +113,12 @@ foreach ($subId in $subscriptionIds) {
 
             $lagMinutes = [math]::Round(($nowUtc - $lastSync.ToUniversalTime()).TotalMinutes, 2)
             $isOverThreshold = $lagMinutes -gt $ThresholdMinutes
+            
+            # Get geo-replication status from GeoReplicationStats
+            $geoStatus = $geoReplicationStats.Status
+            if (-not $geoStatus) {
+                $geoStatus = "Unknown"
+            }
 
             $result = [PSCustomObject]@{
                 SubscriptionId    = $subId
@@ -116,7 +126,7 @@ foreach ($subId in $subscriptionIds) {
                 StorageAccount    = $sa.StorageAccountName
                 Location          = $sa.Location
                 SkuName           = $sku
-                GeoStatus         = $geo.Status
+                GeoStatus         = $geoStatus
                 LastSyncTimeUtc   = $lastSync.ToUniversalTime().ToString("u")
                 LagMinutes        = $lagMinutes
                 IsOverThreshold   = $isOverThreshold
