@@ -9,9 +9,9 @@
       "name": "text - 1"
     },
     {
-      "type": 3,
+      "type": 9,
       "content": {
-        "version": "KqlParameterItem/1.0",
+        "version": "ParametersItem/1.0",
         "parameters": [
           {
             "id": "timeRange",
@@ -40,9 +40,7 @@
             }
           }
         ],
-        "style": "pills",
-        "queryType": 0,
-        "resourceType": "microsoft.operationalinsights/workspaces"
+        "style": "pills"
       },
       "name": "parameters - 1"
     },
@@ -57,7 +55,13 @@
       "type": 3,
       "content": {
         "version": "KqlParameterItem/1.0",
-        "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| summarize \n    TotalAccounts = count(),\n    GeoReplicated = countif(IsGeoReplicated_b_b == true),\n    NotGeoReplicated = countif(IsGeoReplicated_b_b == false),\n    WithReadAccess = countif(HasReadAccess_b_b == true),\n    OverThreshold = countif(IsOverThreshold_b_b == true),\n    Healthy = countif(HasReadAccess_b_b == true and IsOverThreshold_b_b == false)\n| extend \n    GeoReplicationPercentage = round((GeoReplicated * 100.0 / TotalAccounts), 1),\n    HealthPercentage = round((Healthy * 100.0 / WithReadAccess), 1)\n| project TotalAccounts, GeoReplicated, NotGeoReplicated, WithReadAccess, \n         OverThreshold, Healthy, GeoReplicationPercentage, HealthPercentage",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| summarize \n    TotalAccounts = count(),\n    GeoReplicated = countif(IsGeoReplicated_b_b == true),\n    NotGeoReplicated = countif(IsGeoReplicated_b_b == false),\n    WithReadAccess = countif(HasReadAccess_b_b == true),\n    OverThreshold = countif(IsOverThreshold_b_b == true),\n    Healthy = countif(HasReadAccess_b_b == true and IsOverThreshold_b_b == false)\n| extend \n    GeoReplicationPercentage = round((GeoReplicated * 100.0 / TotalAccounts), 1),\n    HealthPercentage = round((Healthy * 100.0 / WithReadAccess), 1)\n| project TotalAccounts, GeoReplicated, NotGeoReplicated, WithReadAccess, \n         OverThreshold, Healthy, GeoReplicationPercentage, HealthPercentage",
+            "id": "query1",
+            "name": "Query 1"
+          }
+        ],
         "size": 0,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -108,7 +112,13 @@
       "type": 3,
       "content": {
         "version": "KqlParameterItem/1.0",
-        "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == true\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| project TimeGenerated, SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s, \n         Location = PrimaryLocation_s_s, SkuName_s_s, GeoReplicationStatus_s_s,\n         LagMinutes_d_d, ThresholdMinutes_d_d, IsOverThreshold_b_b\n| order by IsOverThreshold_b_b desc, LagMinutes_d_d desc nulls last",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == true\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| project TimeGenerated, SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s, \n         Location = PrimaryLocation_s_s, SkuName_s_s, GeoReplicationStatus_s_s,\n         LagMinutes_d_d, ThresholdMinutes_d_d, IsOverThreshold_b_b\n| order by IsOverThreshold_b_b desc, LagMinutes_d_d desc nulls last",
+            "id": "query2",
+            "name": "Query 2"
+          }
+        ],
         "size": 0,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -184,7 +194,13 @@
       "type": 3,
       "content": {
         "version": "KqlParameterItem/1.0",
-        "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where IsOverThreshold_b_b == true\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| project TimeGenerated, SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s,\n         Location = PrimaryLocation_s_s, SkuName_s_s, GeoReplicationStatus_s_s,\n         LagMinutes_d_d, ThresholdMinutes_d_d\n| extend LagOverThreshold = LagMinutes_d_d - ThresholdMinutes_d_d\n| order by LagOverThreshold desc",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where IsOverThreshold_b_b == true\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| project TimeGenerated, SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s,\n         Location = PrimaryLocation_s_s, SkuName_s_s, GeoReplicationStatus_s_s,\n         LagMinutes_d_d, ThresholdMinutes_d_d\n| extend LagOverThreshold = LagMinutes_d_d - ThresholdMinutes_d_d\n| order by LagOverThreshold desc",
+            "id": "query3",
+            "name": "Query 3"
+          }
+        ],
         "size": 0,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -232,7 +248,13 @@
       "type": 3,
       "content": {
         "version": "KqlParameterItem/1.0",
-        "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == false\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| project TimeGenerated, SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s,\n         Location = PrimaryLocation_s_s, SkuName_s_s\n| order by SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == false\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| project TimeGenerated, SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s,\n         Location = PrimaryLocation_s_s, SkuName_s_s\n| order by SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s",
+            "id": "query4",
+            "name": "Query 4"
+          }
+        ],
         "size": 0,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -251,7 +273,13 @@
       "type": 3,
       "content": {
         "version": "KqlParameterItem/1.0",
-        "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize \n    AvgLag = avg(LagMinutes_d_d),\n    MaxLag = max(LagMinutes_d_d),\n    MinLag = min(LagMinutes_d_d)\n    by bin(TimeGenerated, 1h)\n| render timechart",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize \n    AvgLag = avg(LagMinutes_d_d),\n    MaxLag = max(LagMinutes_d_d),\n    MinLag = min(LagMinutes_d_d)\n    by bin(TimeGenerated, 1h)\n| render timechart",
+            "id": "query5",
+            "name": "Query 5"
+          }
+        ],
         "size": 0,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -289,7 +317,13 @@
       "type": 3,
       "content": {
         "version": "KqlParameterItem/1.0",
-        "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| extend Status = case(\n    IsOverThreshold_b_b == true, \"Over Threshold\",\n    HasReadAccess_b_b == true and IsOverThreshold_b_b == false, \"Healthy (Monitored)\",\n    IsGeoReplicated_b_b == true and HasReadAccess_b_b == false, \"GRS (No Read Access)\",\n    \"Not Geo-Replicated\")\n| summarize Count = count() by Status\n| order by Count desc",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| extend Status = case(\n    IsOverThreshold_b_b == true, \"Over Threshold\",\n    HasReadAccess_b_b == true and IsOverThreshold_b_b == false, \"Healthy (Monitored)\",\n    IsGeoReplicated_b_b == true and HasReadAccess_b_b == false, \"GRS (No Read Access)\",\n    \"Not Geo-Replicated\")\n| summarize Count = count() by Status\n| order by Count desc",
+            "id": "query6",
+            "name": "Query 6"
+          }
+        ],
         "size": 0,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
@@ -316,7 +350,13 @@
       "type": 3,
       "content": {
         "version": "KqlParameterItem/1.0",
-        "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago(24h)\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize MaxLag = max(LagMinutes_d_d) by SubscriptionId_s_s, ResourceName_s_s\n| top 10 by MaxLag desc\n| project SubscriptionId_s_s, ResourceName_s_s, MaxLag",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago(24h)\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize MaxLag = max(LagMinutes_d_d) by SubscriptionId_s_s, ResourceName_s_s\n| top 10 by MaxLag desc\n| project SubscriptionId_s_s, ResourceName_s_s, MaxLag",
+            "id": "query7",
+            "name": "Query 7"
+          }
+        ],
         "size": 0,
         "queryType": 0,
         "resourceType": "microsoft.operationalinsights/workspaces",
