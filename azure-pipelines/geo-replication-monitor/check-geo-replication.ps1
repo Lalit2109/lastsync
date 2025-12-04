@@ -180,31 +180,33 @@ if ($LogAnalyticsWorkspaceId -and $LogAnalyticsSharedKey -and $results.Count -gt
     if (Test-Path $logAnalyticsModule) {
         . $logAnalyticsModule
         
-        # Transform results to Log Analytics format (generic InfraMonitoring_CL table)
+        # Transform results to Log Analytics format
         # Include ALL storage accounts (not just geo-replicated ones)
+        # Note: Field names don't include suffixes - Log Analytics will add them automatically based on data types
         $logAnalyticsData = $results | ForEach-Object {
             @{
                 TimeGenerated = [DateTime]::UtcNow.ToString("o")
-                ServiceType_s = "StorageGeoReplication"
-                SubscriptionId_s = $_.SubscriptionId
-                ResourceGroup_s = $_.ResourceGroup
-                ResourceName_s = $_.StorageAccount
-                ResourceType_s = "Microsoft.Storage/storageAccounts"
-                PrimaryLocation_s = $_.Location
-                SkuName_s = $_.SkuName
-                IsGeoReplicated_b = $_.IsGeoReplicated
-                HasReadAccess_b = $_.HasReadAccess
-                GeoReplicationStatus_s = if ($_.GeoStatus) { $_.GeoStatus } else { "N/A" }
-                LastSyncTime_t = if ($_.LastSyncTimeUtc) { $_.LastSyncTimeUtc } else { $null }
-                LagMinutes_d = if ($_.LagMinutes) { $_.LagMinutes } else { $null }
-                IsOverThreshold_b = $_.IsOverThreshold
-                ThresholdMinutes_d = $_.ThresholdMinutes
-                Environment_s = $_.Environment
-                RunId_s = if ($env:BUILD_BUILDID) { "$($env:BUILD_BUILDID)-$($env:BUILD_BUILDNUMBER)" } else { "manual-$(Get-Date -Format 'yyyyMMddHHmmss')" }
+                ServiceType = "StorageGeoReplication"
+                SubscriptionId = $_.SubscriptionId
+                ResourceGroup = $_.ResourceGroup
+                ResourceName = $_.StorageAccount
+                ResourceType = "Microsoft.Storage/storageAccounts"
+                PrimaryLocation = $_.Location
+                SkuName = $_.SkuName
+                IsGeoReplicated = $_.IsGeoReplicated
+                HasReadAccess = $_.HasReadAccess
+                GeoReplicationStatus = if ($_.GeoStatus) { $_.GeoStatus } else { "N/A" }
+                LastSyncTime = if ($_.LastSyncTimeUtc) { $_.LastSyncTimeUtc } else { $null }
+                LagMinutes = if ($_.LagMinutes) { $_.LagMinutes } else { $null }
+                IsOverThreshold = $_.IsOverThreshold
+                ThresholdMinutes = $_.ThresholdMinutes
+                Environment = $_.Environment
+                RunId = if ($env:BUILD_BUILDID) { "$($env:BUILD_BUILDID)-$($env:BUILD_BUILDNUMBER)" } else { "manual-$(Get-Date -Format 'yyyyMMddHHmmss')" }
             }
         }
         
-        # Using StorageGeoReplication to create a table with correct schema (single suffixes)
+        # Using StorageGeoReplication to create a table with correct schema
+        # Log Analytics will automatically add type suffixes (_s, _b, _d, _t) based on data types
         # This will create a table named StorageGeoReplication_CL in Log Analytics
         $logSent = Send-ToLogAnalytics -WorkspaceId $LogAnalyticsWorkspaceId -SharedKey $LogAnalyticsSharedKey -Data $logAnalyticsData -LogType "StorageGeoReplication"
         if ($logSent) {

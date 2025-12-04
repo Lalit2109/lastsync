@@ -6,7 +6,13 @@ This guide walks you through setting up Azure Log Analytics to collect geo-repli
 
 The PowerShell script sends monitoring data to a Log Analytics workspace using the **Data Collector API**. This data is stored in a custom table called `StorageGeoReplication_CL` (the `_CL` suffix indicates a custom log). This table is specifically designed for storage account geo-replication monitoring.
 
-> **Note**: If you see double suffixes in your table (like `IsGeoReplicated_b_b` instead of `IsGeoReplicated_b`), it means the schema was created incorrectly on first ingestion. The script now uses `StorageGeoReplication` to create a table with the correct schema. If you need to keep using an old table, update all queries to use the double-suffixed field names (e.g., `IsGeoReplicated_b_b`, `HasReadAccess_b_b`, `GeoReplicationStatus_s_s`).
+> **Important**: The script sends field names **without type suffixes** (e.g., `IsGeoReplicated`, `LagMinutes`). Log Analytics automatically adds the correct type suffixes based on the actual data types:
+> - `_s` for strings (e.g., `ServiceType` becomes `ServiceType_s`)
+> - `_b` for booleans (e.g., `IsGeoReplicated` becomes `IsGeoReplicated_b`)
+> - `_d` for numbers (e.g., `LagMinutes` becomes `LagMinutes_d`)
+> - `_t` for dates (e.g., `LastSyncTime` becomes `LastSyncTime_t`)
+> 
+> This ensures the schema is created correctly with single suffixes. All queries in this guide use the field names with single suffixes as they appear in Log Analytics.
 
 ## Step 1: Create or Identify Log Analytics Workspace
 
@@ -402,40 +408,46 @@ Log Analytics uses type suffixes to determine data types in custom tables:
 - `_b` = Boolean (true/false)
 - `_d` = Double (number)
 - `_t` = DateTime (timestamp)
+- `_g` = GUID
 
-### Double Suffix Issue
+### How the Script Works
 
-If you see double suffixes in your table (like `IsGeoReplicated_b_b` instead of `IsGeoReplicated_b`), this means:
-1. The schema was created incorrectly on first ingestion
-2. Log Analytics schema is **locked** after first creation and cannot be changed
-3. The current script uses `InfraMonitoringV2` to create a new table with correct schema
+The PowerShell script sends field names **without suffixes** (e.g., `IsGeoReplicated`, `LagMinutes`, `ServiceType`). Log Analytics automatically adds the correct type suffixes based on the actual data types when the data is ingested. This ensures:
+- Correct single suffixes are applied (e.g., `IsGeoReplicated` → `IsGeoReplicated_b`)
+- No double suffix issues occur
+- The schema is created correctly on first ingestion
 
-### Solution Options
+### If You Have an Old Table with Double Suffixes
 
-**Option 1: Use New Table (Recommended)**
-- The script now uses `StorageGeoReplication_CL` table with correct single suffixes
-- All queries in this guide use `StorageGeoReplication_CL`
-- This is the cleanest solution
+If you previously created a table with double suffixes (like `IsGeoReplicated_b_b`), you have two options:
+
+**Option 1: Use a New Table Name (Recommended)**
+- Change the LogType in the script to a new name (e.g., `"StorageGeoReplicationV2"`)
+- This creates a fresh table with correct single suffixes
+- Update all queries to use the new table name
 
 **Option 2: Keep Using Old Table**
-- If you want to keep using `InfraMonitoring_CL` with double suffixes:
-  1. Change the script back to use `"InfraMonitoring"` as LogType
-  2. Update all queries to use double suffixes:
-     - `IsGeoReplicated_b_b` instead of `IsGeoReplicated_b`
-     - `HasReadAccess_b_b` instead of `HasReadAccess_b`
-     - `GeoReplicationStatus_s_s` instead of `GeoReplicationStatus_s`
-     - `IsOverThreshold_b_b` instead of `IsOverThreshold_b`
-     - `LastSyncTime_t_s` instead of `LastSyncTime_t`
+- Update all queries to use the double-suffixed field names:
+  - `IsGeoReplicated_b_b` instead of `IsGeoReplicated_b`
+  - `HasReadAccess_b_b` instead of `HasReadAccess_b`
+  - `GeoReplicationStatus_s_s` instead of `GeoReplicationStatus_s`
+  - `IsOverThreshold_b_b` instead of `IsOverThreshold_b`
+  - `LastSyncTime_t_s` instead of `LastSyncTime_t`
 
 ### How to Check Your Table Schema
 
 Run this query to see all column names and types:
 ```kusto
-StorageGeoReplication_CL  // or InfraMonitoring_CL for old table
+StorageGeoReplication_CL
 | getschema
 | project ColumnName, ColumnType
 | order by ColumnName
 ```
+
+You should see single suffixes like:
+- `IsGeoReplicated_b` (not `IsGeoReplicated_b_b`)
+- `LagMinutes_d` (not `LagMinutes_d_d`)
+- `ServiceType_s` (not `ServiceType_s_s`)
 
 ## Step 8: Create Alerts from Log Analytics (Optional)
 
