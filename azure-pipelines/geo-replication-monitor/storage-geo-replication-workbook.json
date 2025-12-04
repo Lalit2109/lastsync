@@ -9,9 +9,9 @@
       "name": "text - 1"
     },
     {
-      "type": 9,
+      "type": 3,
       "content": {
-        "version": "ParametersItem/1.0",
+        "version": "KqlParameterItem/1.0",
         "parameters": [
           {
             "id": "timeRange",
@@ -40,7 +40,9 @@
             }
           }
         ],
-        "style": "pills"
+        "style": "pills",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
       },
       "name": "parameters - 1"
     },
