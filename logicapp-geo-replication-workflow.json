@@ -1,0 +1,433 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2019-05-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "subscriptions": {
+      "type": "Array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "List of subscription IDs to scan. Leave empty to call ARM list-subscriptions."
+      }
+    },
+    "thresholdMinutes": {
+      "type": "Int",
+      "defaultValue": 30,
+      "metadata": {
+        "description": "Alert threshold – geo-replication lag in minutes."
+      }
+    },
+    "mode": {
+      "type": "String",
+      "defaultValue": "alert",
+      "allowedValues": [
+        "alert",
+        "report"
+      ],
+      "metadata": {
+        "description": "alert = only email when lag exceeds threshold; report = always email status report."
+      }
+    },
+    "emailTo": {
+      "type": "String",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Primary email recipients (comma-separated)."
+      }
+    },
+    "emailSubjectPrefix": {
+      "type": "String",
+      "defaultValue": "[Storage Geo-Replication]",
+      "metadata": {
+        "description": "Prefix for email subject lines."
+      }
+    }
+  },
+  "triggers": {
+    "Recurrence": {
+      "type": "Recurrence",
+      "recurrence": {
+        "frequency": "Hour",
+        "interval": 1
+      }
+    }
+  },
+  "actions": {
+    "Initialize_AllAccounts": {
+      "type": "InitializeVariable",
+      "runAfter": {},
+      "inputs": {
+        "variables": [
+          {
+            "name": "allAccounts",
+            "type": "Array",
+            "value": []
+          }
+        ]
+      }
+    },
+    "Determine_Subscriptions_Source": {
+      "type": "If",
+      "runAfter": {
+        "Initialize_AllAccounts": [
+          "Succeeded"
+        ]
+      },
+      "expression": {
+        "and": [
+          {
+            "equals": [
+              "@length(parameters('subscriptions'))",
+              0
+            ]
+          }
+        ]
+      },
+      "actions": {
+        "List_Subscriptions_ARM": {
+          "type": "Http",
+          "inputs": {
+            "method": "GET",
+            "uri": "https://management.azure.com/subscriptions?api-version=2020-01-01",
+            "authentication": {
+              "type": "ManagedServiceIdentity"
+            }
+          },
+          "runAfter": {}
+        },
+        "For_each_subscription_from_ARM": {
+          "type": "Foreach",
+          "foreach": "@body('List_Subscriptions_ARM')?['value']",
+          "runAfter": {
+            "List_Subscriptions_ARM": [
+              "Succeeded"
+            ]
+          },
+          "actions": {
+            "List_Storage_Accounts": {
+              "type": "Http",
+              "inputs": {
+                "method": "GET",
+                "uri": "@concat('https://management.azure.com/subscriptions/', item()?['subscriptionId'], '/providers/Microsoft.Storage/storageAccounts?api-version=2023-01-01')",
+                "authentication": {
+                  "type": "ManagedServiceIdentity"
+                }
+              }
+            },
+            "For_each_storage_account": {
+              "type": "Foreach",
+              "foreach": "@body('List_Storage_Accounts')?['value']",
+              "runAfter": {
+                "List_Storage_Accounts": [
+                  "Succeeded"
+                ]
+              },
+              "actions": {
+                "Check_if_geo_replicated": {
+                  "type": "If",
+                  "expression": {
+                    "or": [
+                      {
+                        "equals": [
+                          "@item()?['sku']?['name']",
+                          "Standard_RAGRS"
+                        ]
+                      },
+                      {
+                        "equals": [
+                          "@item()?['sku']?['name']",
+                          "Standard_RAGZRS"
+                        ]
+                      },
+                      {
+                        "equals": [
+                          "@item()?['sku']?['name']",
+                          "Standard_GZRS"
+                        ]
+                      }
+                    ]
+                  },
+                  "actions": {
+                    "Get_Blob_Stats": {
+                      "type": "Http",
+                      "inputs": {
+                        "method": "GET",
+                        "uri": "@concat('https://', item()?['name'], '.blob.core.windows.net/?restype=service&comp=stats')",
+                        "headers": {
+                          "x-ms-version": "2020-10-02"
+                        },
+                        "authentication": {
+                          "type": "ManagedServiceIdentity"
+                        }
+                      }
+                    },
+                    "Parse_Blob_Stats_XML": {
+                      "type": "Compose",
+                      "runAfter": {
+                        "Get_Blob_Stats": [
+                          "Succeeded"
+                        ]
+                      },
+                      "inputs": "@xml(body('Get_Blob_Stats'))"
+                    },
+                    "Compute_Lag_Minutes": {
+                      "type": "Compose",
+                      "runAfter": {
+                        "Parse_Blob_Stats_XML": [
+                          "Succeeded"
+                        ]
+                      },
+                      "inputs": "@dateDifference(outputs('Parse_Blob_Stats_XML')?['StorageServiceStats']['GeoReplication']['LastSyncTime'], utcNow(), 'Minute')"
+                    },
+                    "Append_Account_Record": {
+                      "type": "AppendToArrayVariable",
+                      "runAfter": {
+                        "Compute_Lag_Minutes": [
+                          "Succeeded"
+                        ]
+                      },
+                      "inputs": {
+                        "name": "allAccounts",
+                        "value": {
+                          "subscriptionId": "@item()?['id']",
+                          "storageAccountName": "@item()?['name']",
+                          "location": "@item()?['location']",
+                          "skuName": "@item()?['sku']?['name']",
+                          "primaryLocation": "@item()?['properties']?['primaryLocation']",
+                          "secondaryLocation": "@item()?['properties']?['secondaryLocation']",
+                          "geoReplicationStatus": "@outputs('Parse_Blob_Stats_XML')?['StorageServiceStats']['GeoReplication']['Status']",
+                          "lastSyncTime": "@outputs('Parse_Blob_Stats_XML')?['StorageServiceStats']['GeoReplication']['LastSyncTime']",
+                          "lagMinutes": "@outputs('Compute_Lag_Minutes')"
+                        }
+                      }
+                    }
+                  },
+                  "else": {
+                    "actions": {}
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "actions": {
+          "For_each_subscription_from_param": {
+            "type": "Foreach",
+            "foreach": "@parameters('subscriptions')",
+            "actions": {
+              "List_Storage_Accounts_param": {
+                "type": "Http",
+                "inputs": {
+                  "method": "GET",
+                  "uri": "@concat('https://management.azure.com/subscriptions/', item(), '/providers/Microsoft.Storage/storageAccounts?api-version=2023-01-01')",
+                  "authentication": {
+                    "type": "ManagedServiceIdentity"
+                  }
+                }
+              },
+              "For_each_storage_account_param": {
+                "type": "Foreach",
+                "foreach": "@body('List_Storage_Accounts_param')?['value']",
+                "runAfter": {
+                  "List_Storage_Accounts_param": [
+                    "Succeeded"
+                  ]
+                },
+                "actions": {
+                  "Check_if_geo_replicated_param": {
+                    "type": "If",
+                    "expression": {
+                      "or": [
+                        {
+                          "equals": [
+                            "@item()?['sku']?['name']",
+                            "Standard_RAGRS"
+                          ]
+                        },
+                        {
+                          "equals": [
+                            "@item()?['sku']?['name']",
+                            "Standard_RAGZRS"
+                          ]
+                        },
+                        {
+                          "equals": [
+                            "@item()?['sku']?['name']",
+                            "Standard_GZRS"
+                          ]
+                        }
+                      ]
+                    },
+                    "actions": {
+                      "Get_Blob_Stats_param": {
+                        "type": "Http",
+                        "inputs": {
+                          "method": "GET",
+                          "uri": "@concat('https://', item()?['name'], '.blob.core.windows.net/?restype=service&comp=stats')",
+                          "headers": {
+                            "x-ms-version": "2020-10-02"
+                          },
+                          "authentication": {
+                            "type": "ManagedServiceIdentity"
+                          }
+                        }
+                      },
+                      "Parse_Blob_Stats_XML_param": {
+                        "type": "Compose",
+                        "runAfter": {
+                          "Get_Blob_Stats_param": [
+                            "Succeeded"
+                          ]
+                        },
+                        "inputs": "@xml(body('Get_Blob_Stats_param'))"
+                      },
+                      "Compute_Lag_Minutes_param": {
+                        "type": "Compose",
+                        "runAfter": {
+                          "Parse_Blob_Stats_XML_param": [
+                            "Succeeded"
+                          ]
+                        },
+                        "inputs": "@dateDifference(outputs('Parse_Blob_Stats_XML_param')?['StorageServiceStats']['GeoReplication']['LastSyncTime'], utcNow(), 'Minute')"
+                      },
+                      "Append_Account_Record_param": {
+                        "type": "AppendToArrayVariable",
+                        "runAfter": {
+                          "Compute_Lag_Minutes_param": [
+                            "Succeeded"
+                          ]
+                        },
+                        "inputs": {
+                          "name": "allAccounts",
+                          "value": {
+                            "subscriptionId": "@item()?['id']",
+                            "storageAccountName": "@item()?['name']",
+                            "location": "@item()?['location']",
+                            "skuName": "@item()?['sku']?['name']",
+                            "primaryLocation": "@item()?['properties']?['primaryLocation']",
+                            "secondaryLocation": "@item()?['properties']?['secondaryLocation']",
+                            "geoReplicationStatus": "@outputs('Parse_Blob_Stats_XML_param')?['StorageServiceStats']['GeoReplication']['Status']",
+                            "lastSyncTime": "@outputs('Parse_Blob_Stats_XML_param')?['StorageServiceStats']['GeoReplication']['LastSyncTime']",
+                            "lagMinutes": "@outputs('Compute_Lag_Minutes_param')"
+                          }
+                        }
+                      }
+                    },
+                    "else": {
+                      "actions": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "Filter_and_Send_Email": {
+      "type": "If",
+      "runAfter": {
+        "Determine_Subscriptions_Source": [
+          "Succeeded"
+        ]
+      },
+      "expression": {
+        "equals": [
+          "@parameters('mode')",
+          "alert"
+        ]
+      },
+      "actions": {
+        "Select_Over_Threshold": {
+          "type": "Select",
+          "inputs": {
+            "from": "@variables('allAccounts')",
+            "where": "@greater(int(item()?['lagMinutes']), parameters('thresholdMinutes'))",
+            "select": "@item()"
+          }
+        },
+        "Condition_Has_Alerts": {
+          "type": "If",
+          "runAfter": {
+            "Select_Over_Threshold": [
+              "Succeeded"
+            ]
+          },
+          "expression": {
+            "greater": [
+              "@length(body('Select_Over_Threshold'))",
+              0
+            ]
+          },
+          "actions": {
+            "Compose_Alert_HTML": {
+              "type": "Compose",
+              "inputs": "@{concat('<h2>Storage Accounts with geo-replication lag over ', string(parameters('thresholdMinutes')), ' minutes</h2>','<table border=\"1\"><tr><th>Subscription</th><th>Account</th><th>Location</th><th>SKU</th><th>Status</th><th>Last Sync (UTC)</th><th>Lag (min)</th></tr>', join(array(map(body('Select_Over_Threshold'), 'concat(\"<tr><td>\", item().subscriptionId, \"</td><td>\", item().storageAccountName, \"</td><td>\", item().location, \"</td><td>\", item().skuName, \"</td><td>\", item().geoReplicationStatus, \"</td><td>\", item().lastSyncTime, \"</td><td>\", string(item().lagMinutes), \"</td></tr>\")')), ''), '</table>')}"
+            },
+            "Send_Alert_Email": {
+              "type": "ApiConnection",
+              "runAfter": {
+                "Compose_Alert_HTML": [
+                  "Succeeded"
+                ]
+              },
+              "inputs": {
+                "host": {
+                  "connection": {
+                    "name": "@parameters('$connections')['office365']['connectionId']"
+                  }
+                },
+                "method": "post",
+                "path": "/v2/Mail",
+                "body": {
+                  "To": "@parameters('emailTo')",
+                  "Subject": "@concat(parameters('emailSubjectPrefix'), ' ALERT - geo-replication lag over ', string(parameters('thresholdMinutes')), ' minutes')",
+                  "Body": "@outputs('Compose_Alert_HTML')",
+                  "BodyContentType": "HTML"
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {}
+          }
+        }
+      },
+      "else": {
+        "actions": {
+          "Compose_Report_HTML": {
+            "type": "Compose",
+            "inputs": "@{concat('<h2>Storage Account geo-replication status report</h2>','<p>Threshold: ', string(parameters('thresholdMinutes')), ' minutes (accounts above threshold highlighted).</p>','<table border=\"1\"><tr><th>Subscription</th><th>Account</th><th>Location</th><th>SKU</th><th>Status</th><th>Last Sync (UTC)</th><th>Lag (min)</th></tr>', join(array(map(variables('allAccounts'), 'concat(\"<tr>\", if(greater(int(item().lagMinutes), parameters(\"thresholdMinutes\")), \" style=\\\"background-color:#ffcccc;\\\"\", \"\"), \"<td>\", item().subscriptionId, \"</td><td>\", item().storageAccountName, \"</td><td>\", item().location, \"</td><td>\", item().skuName, \"</td><td>\", item().geoReplicationStatus, \"</td><td>\", item().lastSyncTime, \"</td><td>\", string(item().lagMinutes), \"</td></tr>\")')), ''), '</table>')}"
+          },
+          "Send_Report_Email": {
+            "type": "ApiConnection",
+            "runAfter": {
+              "Compose_Report_HTML": [
+                "Succeeded"
+              ]
+            },
+            "inputs": {
+              "host": {
+                "connection": {
+                  "name": "@parameters('$connections')['office365']['connectionId']"
+                }
+              },
+              "method": "post",
+              "path": "/v2/Mail",
+              "body": {
+                "To": "@parameters('emailTo')",
+                "Subject": "@concat(parameters('emailSubjectPrefix'), ' Status Report')",
+                "Body": "@outputs('Compose_Report_HTML')",
+                "BodyContentType": "HTML"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "outputs": {}
+}
+
+
