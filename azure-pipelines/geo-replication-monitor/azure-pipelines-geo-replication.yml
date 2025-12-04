@@ -1,0 +1,54 @@
+trigger: none
+
+schedules:
+  - cron: "0 * * * *" # every hour on the hour
+    displayName: "Hourly storage geo-replication check"
+    branches:
+      include:
+        - main
+    always: true
+
+pool:
+  # Use your existing self-hosted agent pool name here
+  name: 'self-hosted'
+
+variables:
+  # Comma-separated list of subscription IDs to scan
+  SubscriptionsCsv: '00000000-0000-0000-0000-000000000000'
+
+  # Alert threshold in minutes
+  ThresholdMinutes: 30
+
+  # Mode: 'alert' (only send when over threshold) or 'report' (always send report)
+  Mode: 'alert'
+
+  # Logical environment label (shown in email subject/body)
+  Environment: 'Prod'
+
+stages:
+  - stage: GeoReplicationMonitor
+    displayName: 'Storage geo-replication monitor'
+    jobs:
+      - job: RunCheck
+        displayName: 'Run geo-replication check'
+        steps:
+          - checkout: self
+
+          - task: AzurePowerShell@5
+            displayName: 'Run geo-replication script'
+            inputs:
+              azureSubscription: 'YOUR-AZURE-RM-SERVICE-CONNECTION'
+              ScriptType: 'FilePath'
+              ScriptPath: 'azure-pipelines/geo-replication-monitor/check-geo-replication.ps1'
+              ScriptArguments: >
+                -SubscriptionsCsv "$(SubscriptionsCsv)"
+                -ThresholdMinutes $(ThresholdMinutes)
+                -SendGridApiKey "$(SendGridApiKey)"
+                -SendGridFrom "$(SendGridFrom)"
+                -SendGridTo "$(SendGridTo)"
+                -Mode "$(Mode)"
+                -Environment "$(Environment)"
+              azurePowerShellVersion: 'LatestVersion'
+              pwsh: true
+
+
