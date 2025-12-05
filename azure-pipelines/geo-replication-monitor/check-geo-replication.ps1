@@ -225,10 +225,10 @@ else {
 
 # Filter to only geo-replicated accounts for email reporting
 # Note: Log Analytics receives ALL accounts (both geo-replicated and non-geo-replicated)
-$geoReplicatedAccounts = $results | Where-Object { $_.IsGeoReplicated -eq $true }
+$geoReplicatedAccounts = @($results | Where-Object { $_.IsGeoReplicated -eq $true })
 
 # For email alerts, consider only geo-replicated accounts that are over threshold
-$overThreshold = $geoReplicatedAccounts | Where-Object { $_.IsOverThreshold -eq $true }
+$overThreshold = @($geoReplicatedAccounts | Where-Object { $_.IsOverThreshold -eq $true })
 
 if ($Mode -eq "alert" -and -not $overThreshold) {
     Write-Host "Mode=alert and no geo-replicated accounts over threshold. No email will be sent."
@@ -304,12 +304,13 @@ function New-HtmlTable {
 
 # Email reports only include geo-replicated accounts (for both alert and report modes)
 # Log Analytics already receives all accounts above
+# Ensure emailData is always an array to avoid type conversion errors
 if ($Mode -eq "alert") {
-    $emailData = $overThreshold
+    $emailData = @($overThreshold)
 }
 else {
     # Report mode: include all geo-replicated accounts (not just those over threshold)
-    $emailData = $geoReplicatedAccounts
+    $emailData = @($geoReplicatedAccounts)
 }
 
 if (-not $emailData -or $emailData.Count -eq 0) {
