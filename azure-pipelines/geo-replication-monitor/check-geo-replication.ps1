@@ -183,7 +183,7 @@ if ($LogAnalyticsWorkspaceId -and $LogAnalyticsSharedKey -and $results.Count -gt
         # Transform results to Log Analytics format
         # Include ALL storage accounts (not just geo-replicated ones)
         # Note: Field names don't include suffixes - Log Analytics will add them automatically based on data types
-        $logAnalyticsData = $results | ForEach-Object {
+        $logAnalyticsData = @($results | ForEach-Object {
             @{
                 TimeGenerated = [DateTime]::UtcNow.ToString("o")
                 ServiceType = "StorageGeoReplication"
@@ -203,7 +203,7 @@ if ($LogAnalyticsWorkspaceId -and $LogAnalyticsSharedKey -and $results.Count -gt
                 Environment = $_.Environment
                 RunId = if ($env:BUILD_BUILDID) { "$($env:BUILD_BUILDID)-$($env:BUILD_BUILDNUMBER)" } else { "manual-$(Get-Date -Format 'yyyyMMddHHmmss')" }
             }
-        }
+        })
         
         # Using StorageGeoReplication to create a table with correct schema
         # Log Analytics will automatically add type suffixes (_s, _b, _d, _t) based on data types
