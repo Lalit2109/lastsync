@@ -49,7 +49,7 @@
     {
       "type": 1,
       "content": {
-        "json": "### Summary Statistics"
+        "json": "### Overview - Summary Statistics\n\nKey metrics at a glance:"
       },
       "name": "text - 2"
     },
@@ -59,7 +59,7 @@
         "version": "KqlParameterItem/1.0",
         "queries": [
           {
-            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| summarize \n    TotalAccounts = count(),\n    GeoReplicated = countif(IsGeoReplicated_b_b == true),\n    NotGeoReplicated = countif(IsGeoReplicated_b_b == false),\n    WithReadAccess = countif(HasReadAccess_b_b == true),\n    OverThreshold = countif(IsOverThreshold_b_b == true),\n    Healthy = countif(HasReadAccess_b_b == true and IsOverThreshold_b_b == false)\n| extend \n    GeoReplicationPercentage = round((GeoReplicated * 100.0 / TotalAccounts), 1),\n    HealthPercentage = round((Healthy * 100.0 / WithReadAccess), 1)\n| project TotalAccounts, GeoReplicated, NotGeoReplicated, WithReadAccess, \n         OverThreshold, Healthy, GeoReplicationPercentage, HealthPercentage",
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| summarize \n    TotalAccounts = count(),\n    GeoReplicated = countif(IsGeoReplicated_b_b == true),\n    NotGeoReplicated = countif(IsGeoReplicated_b_b == false),\n    WithReadAccess = countif(HasReadAccess_b_b == true),\n    OverThreshold = countif(IsOverThreshold_b_b == true),\n    Healthy = countif(HasReadAccess_b_b == true and IsOverThreshold_b_b == false)\n| extend \n    GeoReplicationPercentage = round((GeoReplicated * 100.0 / TotalAccounts), 1),\n    HealthPercentage = round((Healthy * 100.0 / WithReadAccess), 1)\n| project \n    TotalAccounts = strcat('Total Storage Accounts: ', TotalAccounts),\n    GeoReplicated = strcat('Geo-Replicated: ', GeoReplicated, ' (', GeoReplicationPercentage, '%)'),\n    NotGeoReplicated = strcat('Not Geo-Replicated: ', NotGeoReplicated),\n    WithReadAccess = strcat('With Read Access (Monitored): ', WithReadAccess),\n    OverThreshold = strcat('⚠️ Over Threshold: ', OverThreshold),\n    Healthy = strcat('✅ Healthy: ', Healthy, ' (', HealthPercentage, '%)')",
             "id": "query1",
             "name": "Query 1"
           }
@@ -72,31 +72,32 @@
           "formatters": [
             {
               "columnMatch": "TotalAccounts",
-              "formatter": 4,
-              "formatOptions": {
-                "palette": "blue"
-              }
+              "formatter": 0
             },
             {
               "columnMatch": "GeoReplicated",
-              "formatter": 4,
-              "formatOptions": {
-                "palette": "green"
-              }
+              "formatter": 0
+            },
+            {
+              "columnMatch": "NotGeoReplicated",
+              "formatter": 0
+            },
+            {
+              "columnMatch": "WithReadAccess",
+              "formatter": 0
             },
             {
               "columnMatch": "OverThreshold",
-              "formatter": 4,
+              "formatter": 0,
               "formatOptions": {
-                "palette": "red"
+                "customNumberFormat": {
+                  "style": "text"
+                }
               }
             },
             {
               "columnMatch": "Healthy",
-              "formatter": 4,
-              "formatOptions": {
-                "palette": "green"
-              }
+              "formatter": 0
             }
           ]
         }
@@ -374,6 +375,271 @@
         }
       },
       "name": "query - Top 10 by Lag"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### Subscription-Level Lag Analysis (Priority Blob Replication Prioritization)\n\nThis analysis helps identify which subscriptions should be prioritized for Azure Priority Blob Replication based on lag patterns."
+      },
+      "name": "text - 9"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| summarize \n    SubscriptionId = any(SubscriptionId_s_s),\n    TotalAccounts = count(),\n    AccountsOverThreshold = countif(IsOverThreshold_b_b == true),\n    AvgLag = round(avg(LagMinutes_d_d), 2),\n    MaxLag = round(max(LagMinutes_d_d), 2),\n    MinLag = round(min(LagMinutes_d_d), 2),\n    MedianLag = round(percentile(LagMinutes_d_d, 50), 2),\n    P95Lag = round(percentile(LagMinutes_d_d, 95), 2),\n    TotalLagMinutes = round(sum(LagMinutes_d_d), 2)\n    by SubscriptionId_s_s\n| extend PriorityScore = round((AvgLag * 0.4) + (MaxLag * 0.3) + (AccountsOverThreshold * 10 * 0.3), 2)\n| extend PriorityRecommendation = case(\n    PriorityScore > 50, \"🔴 High Priority - Consider Priority Blob Replication\",\n    PriorityScore > 20, \"🟡 Medium Priority - Monitor Closely\",\n    PriorityScore > 10, \"🟢 Low Priority - Standard Replication OK\",\n    \"✅ Healthy - No Action Needed\")\n| order by PriorityScore desc, AvgLag desc\n| project SubscriptionId, TotalAccounts, AccountsOverThreshold, AvgLag, MaxLag, MedianLag, P95Lag, PriorityScore, PriorityRecommendation",
+            "id": "query8",
+            "name": "Query 8"
+          }
+        ],
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "grid",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "PriorityScore",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "palette": [
+                  {
+                    "value": 0,
+                    "color": "#00ff00"
+                  },
+                  {
+                    "value": 20,
+                    "color": "#ffff00"
+                  },
+                  {
+                    "value": 50,
+                    "color": "#ff0000"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "AvgLag",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "palette": [
+                  {
+                    "value": 0,
+                    "color": "#00ff00"
+                  },
+                  {
+                    "value": 10,
+                    "color": "#ffff00"
+                  },
+                  {
+                    "value": 20,
+                    "color": "#ff0000"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "MaxLag",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "palette": [
+                  {
+                    "value": 0,
+                    "color": "#00ff00"
+                  },
+                  {
+                    "value": 15,
+                    "color": "#ffff00"
+                  },
+                  {
+                    "value": 30,
+                    "color": "#ff0000"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "PriorityRecommendation",
+              "formatter": 0
+            }
+          ],
+          "rowConditionalFormatting": [
+            {
+              "condition": "PriorityScore > 50",
+              "backgroundColor": "#ffcccc"
+            },
+            {
+              "condition": "PriorityScore > 20 and PriorityScore <= 50",
+              "backgroundColor": "#fff4cc"
+            }
+          ]
+        }
+      },
+      "name": "query - Subscription Priority Analysis"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### Resource Group & Storage Account Level Detail\n\nDrill down into specific resource groups and storage accounts within each subscription."
+      },
+      "name": "text - 10"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| extend LagCategory = case(\n    LagMinutes_d_d > 30, \"Critical (>30 min)\",\n    LagMinutes_d_d > 15, \"High (15-30 min)\",\n    LagMinutes_d_d > 5, \"Medium (5-15 min)\",\n    LagMinutes_d_d > 0, \"Low (0-5 min)\",\n    \"No Lag\")\n| project SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s, \n         Location = PrimaryLocation_s_s, SkuName_s_s,\n         LagMinutes_d_d, ThresholdMinutes_d_d, IsOverThreshold_b_b,\n         GeoReplicationStatus_s_s, LastSyncTime_t_s, LagCategory\n| order by SubscriptionId_s_s, LagMinutes_d_d desc",
+            "id": "query9",
+            "name": "Query 9"
+          }
+        ],
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "grid",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "LagMinutes_d_d",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "palette": [
+                  {
+                    "value": 0,
+                    "color": "#00ff00"
+                  },
+                  {
+                    "value": 5,
+                    "color": "#ffff00"
+                  },
+                  {
+                    "value": 15,
+                    "color": "#ff8800"
+                  },
+                  {
+                    "value": 30,
+                    "color": "#ff0000"
+                  }
+                ],
+                "custom": [
+                  {
+                    "condition": "IsOverThreshold_b_b == true",
+                    "color": "#ff0000"
+                  },
+                  {
+                    "condition": "LagMinutes_d_d > 15 and IsOverThreshold_b_b == false",
+                    "color": "#ff8800"
+                  },
+                  {
+                    "condition": "LagMinutes_d_d > 5 and LagMinutes_d_d <= 15",
+                    "color": "#ffff00"
+                  },
+                  {
+                    "condition": "LagMinutes_d_d <= 5",
+                    "color": "#00ff00"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "LagCategory",
+              "formatter": 0
+            },
+            {
+              "columnMatch": "IsOverThreshold_b_b",
+              "formatter": 5,
+              "formatOptions": {
+                "palette": [
+                  {
+                    "value": true,
+                    "color": "#ff0000"
+                  },
+                  {
+                    "value": false,
+                    "color": "#00ff00"
+                  }
+                ]
+              }
+            }
+          ],
+          "rowConditionalFormatting": [
+            {
+              "condition": "IsOverThreshold_b_b == true",
+              "backgroundColor": "#ffcccc"
+            },
+            {
+              "condition": "LagMinutes_d_d > 15 and IsOverThreshold_b_b == false",
+              "backgroundColor": "#fff4cc"
+            }
+          ]
+        }
+      },
+      "name": "query - Resource Group Detail"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### Subscription Lag Trend Over Time (Last 30 Days)\n\nTrack lag trends by subscription over the last 30 days to identify patterns and prioritize Priority Blob Replication."
+      },
+      "name": "text - 11"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago(30d)\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize \n    AvgLag = round(avg(LagMinutes_d_d), 2),\n    MaxLag = round(max(LagMinutes_d_d), 2),\n    P95Lag = round(percentile(LagMinutes_d_d, 95), 2)\n    by bin(TimeGenerated, 1h), SubscriptionId_s_s\n| extend SubscriptionId = SubscriptionId_s_s\n| order by TimeGenerated asc, SubscriptionId asc",
+            "id": "query10",
+            "name": "Query 10"
+          }
+        ],
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "linechart",
+        "chartSettings": {
+          "series": [
+            {
+              "name": "AvgLag",
+              "label": "Average Lag (minutes)",
+              "xAxis": "TimeGenerated",
+              "yAxis": "AvgLag"
+            },
+            {
+              "name": "MaxLag",
+              "label": "Max Lag (minutes)",
+              "xAxis": "TimeGenerated",
+              "yAxis": "MaxLag"
+            },
+            {
+              "name": "P95Lag",
+              "label": "95th Percentile Lag (minutes)",
+              "xAxis": "TimeGenerated",
+              "yAxis": "P95Lag"
+            }
+          ],
+          "xAxis": {
+            "label": "Time"
+          },
+          "yAxis": {
+            "label": "Lag (minutes)"
+          },
+          "legend": {
+            "showLegend": true,
+            "position": "bottom"
+          }
+        }
+      },
+      "name": "query - Subscription Lag Trend"
     }
   ],
   "fallbackResourceIds": [],
