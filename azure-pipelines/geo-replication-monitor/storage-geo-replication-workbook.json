@@ -379,9 +379,141 @@
     {
       "type": 1,
       "content": {
-        "json": "### Subscription-Level Lag Analysis (Priority Blob Replication Prioritization)\n\nThis analysis helps identify which subscriptions should be prioritized for Azure Priority Blob Replication based on lag patterns."
+        "json": "### Historical Lag Analysis (Last 30 Days) - Priority Blob Replication Prioritization\n\nThis analysis identifies subscriptions with historical lag issues, even if currently synced. Helps prioritize Priority Blob Replication based on past performance patterns."
       },
       "name": "text - 9"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "queries": [
+          {
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago(30d)\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize \n    SubscriptionId = any(SubscriptionId_s_s),\n    TotalDataPoints = count(),\n    TimesOverThreshold = countif(IsOverThreshold_b_b == true),\n    TimesOverThresholdPercent = round((countif(IsOverThreshold_b_b == true) * 100.0 / count()), 1),\n    MaxLagEver = round(max(LagMinutes_d_d), 2),\n    AvgLag = round(avg(LagMinutes_d_d), 2),\n    P95Lag = round(percentile(LagMinutes_d_d, 95), 2),\n    P99Lag = round(percentile(LagMinutes_d_d, 99), 2),\n    CurrentLag = round(maxif(LagMinutes_d_d, TimeGenerated == max(TimeGenerated)), 2),\n    CurrentStatus = anyif(IsOverThreshold_b_b, TimeGenerated == max(TimeGenerated))\n    by SubscriptionId_s_s\n| extend HistoricalPriorityScore = round((MaxLagEver * 0.3) + (AvgLag * 0.2) + (P95Lag * 0.2) + (TimesOverThresholdPercent * 0.3), 2)\n| extend PriorityRecommendation = case(\n    HistoricalPriorityScore > 50 or TimesOverThresholdPercent > 30, \"🔴 High Priority - Frequent lag issues, consider Priority Blob Replication\",\n    HistoricalPriorityScore > 25 or MaxLagEver > 20, \"🟡 Medium Priority - Occasional lag spikes, monitor closely\",\n    HistoricalPriorityScore > 10, \"🟢 Low Priority - Minor lag, standard replication OK\",\n    \"✅ Healthy - No significant lag history\")\n| extend LagHistorySummary = strcat(\"Max: \", MaxLagEver, \" min | Avg: \", AvgLag, \" min | Over threshold: \", TimesOverThresholdPercent, \"% of time\")\n| order by HistoricalPriorityScore desc, MaxLagEver desc, TimesOverThresholdPercent desc\n| project SubscriptionId, TotalDataPoints, TimesOverThreshold, TimesOverThresholdPercent, \n         MaxLagEver, AvgLag, P95Lag, P99Lag, CurrentLag, CurrentStatus,\n         HistoricalPriorityScore, PriorityRecommendation, LagHistorySummary",
+            "id": "query8",
+            "name": "Query 8"
+          }
+        ],
+        "size": 0,
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "visualization": "grid",
+        "gridSettings": {
+          "formatters": [
+            {
+              "columnMatch": "HistoricalPriorityScore",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "palette": [
+                  {
+                    "value": 0,
+                    "color": "#00ff00"
+                  },
+                  {
+                    "value": 25,
+                    "color": "#ffff00"
+                  },
+                  {
+                    "value": 50,
+                    "color": "#ff0000"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "MaxLagEver",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "palette": [
+                  {
+                    "value": 0,
+                    "color": "#00ff00"
+                  },
+                  {
+                    "value": 10,
+                    "color": "#ffff00"
+                  },
+                  {
+                    "value": 20,
+                    "color": "#ff0000"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "TimesOverThresholdPercent",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "max": 100,
+                "palette": [
+                  {
+                    "value": 0,
+                    "color": "#00ff00"
+                  },
+                  {
+                    "value": 15,
+                    "color": "#ffff00"
+                  },
+                  {
+                    "value": 30,
+                    "color": "#ff0000"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "CurrentLag",
+              "formatter": 8,
+              "formatOptions": {
+                "min": 0,
+                "palette": [
+                  {
+                    "value": 0,
+                    "color": "#00ff00"
+                  },
+                  {
+                    "value": 10,
+                    "color": "#ffff00"
+                  },
+                  {
+                    "value": 20,
+                    "color": "#ff0000"
+                  }
+                ]
+              }
+            },
+            {
+              "columnMatch": "PriorityRecommendation",
+              "formatter": 0
+            },
+            {
+              "columnMatch": "LagHistorySummary",
+              "formatter": 0
+            }
+          ],
+          "rowConditionalFormatting": [
+            {
+              "condition": "HistoricalPriorityScore > 50 or TimesOverThresholdPercent > 30",
+              "backgroundColor": "#ffcccc"
+            },
+            {
+              "condition": "HistoricalPriorityScore > 25 and HistoricalPriorityScore <= 50",
+              "backgroundColor": "#fff4cc"
+            }
+          ]
+        }
+      },
+      "name": "query - Historical Lag Analysis"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "### Current State vs Historical Analysis (Subscription-Level)\n\nCompare current lag status with historical patterns to identify subscriptions that may need Priority Blob Replication."
+      },
+      "name": "text - 9b"
     },
     {
       "type": 3,
@@ -480,12 +612,12 @@
           ]
         }
       },
-      "name": "query - Subscription Priority Analysis"
+      "name": "query - Subscription Priority Analysis (Current State)"
     },
     {
       "type": 1,
       "content": {
-        "json": "### Resource Group & Storage Account Level Detail\n\nDrill down into specific resource groups and storage accounts within each subscription."
+        "json": "### Resource Group & Storage Account Level Detail (Historical Analysis - Last 30 Days)\n\nDrill down into specific resource groups and storage accounts. Shows historical lag patterns, not just current state."
       },
       "name": "text - 10"
     },
@@ -495,7 +627,7 @@
         "version": "KqlParameterItem/1.0",
         "queries": [
           {
-            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago({TimeRange})\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize arg_max(TimeGenerated, *) by SubscriptionId_s_s, ResourceName_s_s\n| extend LagCategory = case(\n    LagMinutes_d_d > 30, \"Critical (>30 min)\",\n    LagMinutes_d_d > 15, \"High (15-30 min)\",\n    LagMinutes_d_d > 5, \"Medium (5-15 min)\",\n    LagMinutes_d_d > 0, \"Low (0-5 min)\",\n    \"No Lag\")\n| project SubscriptionId_s_s, ResourceGroup_s_s, ResourceName_s_s, \n         Location = PrimaryLocation_s_s, SkuName_s_s,\n         LagMinutes_d_d, ThresholdMinutes_d_d, IsOverThreshold_b_b,\n         GeoReplicationStatus_s_s, LastSyncTime_t_s, LagCategory\n| order by SubscriptionId_s_s, LagMinutes_d_d desc",
+            "query": "StorageGeoReplication_CL\n| where ServiceType_s_s == \"StorageGeoReplication\"\n| where TimeGenerated > ago(30d)\n| where IsGeoReplicated_b_b == true\n| where HasReadAccess_b_b == true\n| where isnotnull(LagMinutes_d_d)\n| summarize \n    SubscriptionId = any(SubscriptionId_s_s),\n    ResourceGroup = any(ResourceGroup_s_s),\n    ResourceName = any(ResourceName_s_s),\n    Location = any(PrimaryLocation_s_s),\n    SkuName = any(SkuName_s_s),\n    ThresholdMinutes = any(ThresholdMinutes_d_d),\n    TotalDataPoints = count(),\n    TimesOverThreshold = countif(IsOverThreshold_b_b == true),\n    TimesOverThresholdPercent = round((countif(IsOverThreshold_b_b == true) * 100.0 / count()), 1),\n    MaxLagEver = round(max(LagMinutes_d_d), 2),\n    AvgLag = round(avg(LagMinutes_d_d), 2),\n    P95Lag = round(percentile(LagMinutes_d_d, 95), 2),\n    CurrentLag = round(maxif(LagMinutes_d_d, TimeGenerated == max(TimeGenerated)), 2),\n    CurrentStatus = anyif(IsOverThreshold_b_b, TimeGenerated == max(TimeGenerated)),\n    LastSyncTime = anyif(LastSyncTime_t_s, TimeGenerated == max(TimeGenerated))\n    by SubscriptionId_s_s, ResourceName_s_s\n| extend LagCategory = case(\n    MaxLagEver > 30, \"Critical (Max >30 min)\",\n    MaxLagEver > 15, \"High (Max 15-30 min)\",\n    MaxLagEver > 5, \"Medium (Max 5-15 min)\",\n    MaxLagEver > 0, \"Low (Max 0-5 min)\",\n    \"No Lag\")\n| extend HistoricalIssue = case(\n    TimesOverThresholdPercent > 30, \"🔴 Frequent Lag Issues\",\n    TimesOverThresholdPercent > 15, \"🟡 Occasional Lag Issues\",\n    MaxLagEver > 20, \"🟡 High Lag Spikes\",\n    \"✅ No Significant Issues\")\n| project SubscriptionId, ResourceGroup, ResourceName, Location, SkuName,\n         CurrentLag, CurrentStatus, MaxLagEver, AvgLag, P95Lag,\n         TimesOverThreshold, TimesOverThresholdPercent, ThresholdMinutes,\n         LastSyncTime, LagCategory, HistoricalIssue\n| order by SubscriptionId, MaxLagEver desc, TimesOverThresholdPercent desc",
             "id": "query9",
             "name": "Query 9"
           }
