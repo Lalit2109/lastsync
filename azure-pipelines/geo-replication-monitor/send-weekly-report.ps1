@@ -63,7 +63,7 @@ StorageGeoReplication_CL
 | where IsGeoReplicated_b_b == true
 | where HasReadAccess_b_b == true
 | summarize 
-    CurrentLag = arg_max(TimeGenerated, LagMinutes_d_d),
+    CurrentLag = toreal(arg_max(TimeGenerated, LagMinutes_d_d)),
     MaxLag = max(LagMinutes_d_d),
     AvgLag = avg(LagMinutes_d_d),
     MinLag = min(LagMinutes_d_d),
@@ -78,10 +78,10 @@ StorageGeoReplication_CL
     LastSyncTime = arg_max(TimeGenerated, LastSyncTime_t_t)
     by ResourceName_s_s
 | extend PercentOverThreshold = round((TimesOverThreshold * 100.0 / TotalChecks), 1)
-| extend CurrentLag = iff(isnull(CurrentLag), toreal(0), toreal(CurrentLag))
-| extend MaxLag = coalesce(MaxLag, 0.0)
-| extend AvgLag = coalesce(AvgLag, 0.0)
-| extend MinLag = coalesce(MinLag, 0.0)
+| extend CurrentLag = round(iff(isnull(CurrentLag), 0.0, CurrentLag), 2)
+| extend MaxLag = round(coalesce(MaxLag, 0.0), 2)
+| extend AvgLag = round(coalesce(AvgLag, 0.0), 2)
+| extend MinLag = round(coalesce(MinLag, 0.0), 2)
 | order by MaxLag desc, CurrentLag desc
 "@
 
