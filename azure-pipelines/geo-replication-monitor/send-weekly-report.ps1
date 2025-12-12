@@ -260,8 +260,6 @@ else {
         $totalChecks = if ($account.TotalChecks) { [int]$account.TotalChecks } else { 0 }
         $percentOverThreshold = if ($account.PercentOverThreshold) { [math]::Round([double]$account.PercentOverThreshold, 1) } else { 0.0 }
         $threshold = if ($account.ThresholdMinutes) { [int]$account.ThresholdMinutes } else { $ThresholdMinutes }
-        $currentStatus = if ($account.CurrentStatus) { $account.CurrentStatus } else { "N/A" }
-        $lastSyncTime = if ($account.LastSyncTime) { $account.LastSyncTime } else { "N/A" }
 
         # Determine row highlighting based on MaxLag
         $rowStyle = ""
@@ -302,8 +300,6 @@ else {
                      "<td><strong>$resourceName</strong></td>" +
                      "<td>$location</td>" +
                      "<td>$skuName</td>" +
-                     "<td>$currentStatus</td>" +
-                     "<td>$lastSyncTime</td>" +
                      "<td>$maxLagDisplay</td>" +
                      "<td>$avgLagDisplay</td>" +
                      "<td>$minLag</td>" +
@@ -321,8 +317,6 @@ else {
     <th>Storage Account</th>
     <th>Location</th>
     <th>SKU</th>
-    <th>Geo Status</th>
-    <th>Last Sync Time</th>
     <th>Max Lag (7d) (min)</th>
     <th>Avg Lag (7d) (min)</th>
     <th>Min Lag (7d) (min)</th>
