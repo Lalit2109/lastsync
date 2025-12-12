@@ -9,8 +9,10 @@
     Notes:
       - Expected to run inside Azure Pipelines using an AzurePowerShell task
       - Requires Az.Accounts and Az.OperationalInsights modules on the agent
-      - Queries StorageGeoReplication_CL table in Log Analytics
+      - Queries StorageGeoReplication_CL table in Log Analytics using Az.OperationalInsights cmdlets
+      - Uses same Azure context authentication as the rest of the pipeline (no manual token management)
       - Uses same SendGrid configuration as check-geo-replication.ps1
+      - Note: LogAnalyticsSharedKey parameter is not used for querying (only needed for sending data)
 #>
 
 param(
@@ -84,58 +86,27 @@ StorageGeoReplication_CL
 "@
 
 try {
-    # Get access token from current Azure context
-    Write-Host "Getting access token from Azure context..."
+    # Verify Azure context is available
+    Write-Host "Verifying Azure context..."
     $context = Get-AzContext
     if (-not $context) {
         throw "No Azure context found. Please ensure you are logged in via Azure PowerShell task."
     }
 
-    # Get access token for Log Analytics API
-    $resource = "https://api.loganalytics.io"
-    $token = (Get-AzAccessToken -ResourceUrl $resource).Token
+    # Execute query using Az.OperationalInsights PowerShell cmdlet
+    # This uses the same Azure context authentication as the rest of the script
+    Write-Host "Executing KQL query using Az.OperationalInsights module..."
+    $timespan = New-TimeSpan -Days 7
+    $queryResult = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspaceId -Timespan $timespan -Query $kqlQuery -ErrorAction Stop
 
-    if (-not $token) {
-        throw "Failed to obtain access token for Log Analytics API."
-    }
-
-    # Execute query using Log Analytics REST API
-    Write-Host "Executing KQL query via REST API..."
-    $queryUri = "https://api.loganalytics.io/v1/workspaces/$LogAnalyticsWorkspaceId/query"
-
-    $headers = @{
-        "Authorization" = "Bearer $token"
-        "Content-Type"  = "application/json"
-    }
-
-    $body = @{
-        query = $kqlQuery
-    } | ConvertTo-Json -Depth 3
-
-    $response = Invoke-RestMethod -Method Post -Uri $queryUri -Headers $headers -Body $body -ErrorAction Stop
-
-    # Parse response - Log Analytics REST API returns tables with rows
-    if (-not $response -or -not $response.tables -or $response.tables.Count -eq 0) {
-        Write-Warning "No data returned from Log Analytics query."
-        $reportData = @()
+    # Extract results - the cmdlet returns results directly as objects
+    if ($queryResult -and $queryResult.Results) {
+        $reportData = $queryResult.Results
+        Write-Host "Query returned $($reportData.Count) storage accounts"
     }
     else {
-        # Convert table rows to objects
-        $table = $response.tables[0]
-        $columns = $table.columns | ForEach-Object { $_.name }
+        Write-Warning "No data returned from Log Analytics query."
         $reportData = @()
-
-        foreach ($row in $table.rows) {
-            $obj = [PSCustomObject]@{}
-            for ($i = 0; $i -lt $columns.Count; $i++) {
-                $columnName = $columns[$i]
-                $value = $row[$i]
-                $obj | Add-Member -MemberType NoteProperty -Name $columnName -Value $value
-            }
-            $reportData += $obj
-        }
-
-        Write-Host "Query returned $($reportData.Count) storage accounts"
     }
 }
 catch {
