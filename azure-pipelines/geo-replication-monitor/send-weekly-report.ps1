@@ -78,7 +78,7 @@ StorageGeoReplication_CL
     LastSyncTime = arg_max(TimeGenerated, LastSyncTime_t_t)
     by ResourceName_s_s
 | extend PercentOverThreshold = round((TimesOverThreshold * 100.0 / TotalChecks), 1)
-| extend CurrentLag = coalesce(CurrentLag, 0.0)
+| extend CurrentLag = iff(isnull(CurrentLag), toreal(0), toreal(CurrentLag))
 | extend MaxLag = coalesce(MaxLag, 0.0)
 | extend AvgLag = coalesce(AvgLag, 0.0)
 | extend MinLag = coalesce(MinLag, 0.0)
