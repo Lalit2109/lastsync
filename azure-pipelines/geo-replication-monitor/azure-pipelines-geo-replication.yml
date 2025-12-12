@@ -53,4 +53,48 @@ stages:
               azurePowerShellVersion: 'LatestVersion'
               pwsh: true
 
+  - stage: WeeklyReport
+    displayName: 'Weekly storage geo-replication report'
+    jobs:
+      - job: RunWeeklyReport
+        displayName: 'Generate and send weekly report'
+        steps:
+          - task: PowerShell@2
+            displayName: 'Check if Monday 10 AM UTC'
+            inputs:
+              targetType: 'inline'
+              script: |
+                $utcNow = [DateTime]::UtcNow
+                $dayOfWeek = $utcNow.DayOfWeek.ToString()
+                $hour = $utcNow.Hour.ToString()
+                Write-Host "Current UTC time: $utcNow"
+                Write-Host "Day of week: $dayOfWeek, Hour: $hour"
+                if ($dayOfWeek -eq 'Monday' -and $hour -eq '10') {
+                  Write-Host "Proceeding with weekly report - it's Monday 10 AM UTC"
+                  Write-Host "##vso[task.setvariable variable=ShouldRunWeeklyReport]true"
+                } else {
+                  Write-Host "Skipping weekly report - not Monday 10 AM UTC (current: $dayOfWeek $hour`:00 UTC)"
+                  Write-Host "##vso[task.setvariable variable=ShouldRunWeeklyReport]false"
+                }
+          - checkout: self
+            condition: eq(variables['ShouldRunWeeklyReport'], 'true')
+
+          - task: AzurePowerShell@5
+            displayName: 'Run weekly report script'
+            condition: eq(variables['ShouldRunWeeklyReport'], 'true')
+            inputs:
+              azureSubscription: 'YOUR-AZURE-RM-SERVICE-CONNECTION'
+              ScriptType: 'FilePath'
+              ScriptPath: 'azure-pipelines/geo-replication-monitor/send-weekly-report.ps1'
+              ScriptArguments: >
+                -LogAnalyticsWorkspaceId "$(LogAnalyticsWorkspaceId)"
+                -LogAnalyticsSharedKey "$(LogAnalyticsSharedKey)"
+                -SendGridApiKey "$(SendGridApiKey)"
+                -SendGridFrom "$(SendGridFrom)"
+                -SendGridTo "$(SendGridTo)"
+                -Environment "$(Environment)"
+                -ThresholdMinutes $(ThresholdMinutes)
+              azurePowerShellVersion: 'LatestVersion'
+              pwsh: true
+
 
