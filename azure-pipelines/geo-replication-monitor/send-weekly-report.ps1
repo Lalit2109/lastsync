@@ -92,17 +92,28 @@ try {
     if (-not $context) {
         throw "No Azure context found. Please ensure you are logged in via Azure PowerShell task."
     }
+    Write-Host "Azure context verified: Account=$($context.Account.Id), Subscription=$($context.Subscription.Id)"
 
     # Execute query using Az.OperationalInsights PowerShell cmdlet
     # This uses the same Azure context authentication as the rest of the script
     Write-Host "Executing KQL query using Az.OperationalInsights module..."
+    Write-Host "Workspace ID: $LogAnalyticsWorkspaceId"
     $timespan = New-TimeSpan -Days 7
+    Write-Host "Timespan: $timespan"
+    
     $queryResult = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspaceId -Timespan $timespan -Query $kqlQuery -ErrorAction Stop
-
+    
     # Extract results - the cmdlet returns results directly as objects
     if ($queryResult -and $queryResult.Results) {
         $reportData = $queryResult.Results
         Write-Host "Query returned $($reportData.Count) storage accounts"
+    }
+    elseif ($queryResult) {
+        Write-Host "Query completed but no results. QueryResult type: $($queryResult.GetType().Name)"
+        if ($queryResult | Get-Member -MemberType Property) {
+            Write-Host "QueryResult properties: $($queryResult | Get-Member -MemberType Property | Select-Object -ExpandProperty Name -Join ', ')"
+        }
+        $reportData = @()
     }
     else {
         Write-Warning "No data returned from Log Analytics query."
@@ -111,6 +122,8 @@ try {
 }
 catch {
     Write-Error "Failed to query Log Analytics: $_"
+    Write-Error "Exception type: $($_.Exception.GetType().FullName)"
+    Write-Error "Stack trace: $($_.ScriptStackTrace)"
     throw
 }
 
