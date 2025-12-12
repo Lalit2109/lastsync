@@ -63,7 +63,6 @@ StorageGeoReplication_CL
 | where IsGeoReplicated_b_b == true
 | where HasReadAccess_b_b == true
 | summarize 
-    CurrentLag = toreal(arg_max(TimeGenerated, LagMinutes_d_d)),
     MaxLag = max(LagMinutes_d_d),
     AvgLag = avg(LagMinutes_d_d),
     MinLag = min(LagMinutes_d_d),
@@ -78,11 +77,10 @@ StorageGeoReplication_CL
     LastSyncTime = arg_max(TimeGenerated, LastSyncTime_t_t)
     by ResourceName_s_s
 | extend PercentOverThreshold = round((TimesOverThreshold * 100.0 / TotalChecks), 1)
-| extend CurrentLag = round(iff(isnull(CurrentLag), 0.0, CurrentLag), 2)
 | extend MaxLag = round(coalesce(MaxLag, 0.0), 2)
 | extend AvgLag = round(coalesce(AvgLag, 0.0), 2)
 | extend MinLag = round(coalesce(MinLag, 0.0), 2)
-| order by MaxLag desc, CurrentLag desc
+| order by MaxLag desc, AvgLag desc
 "@
 
 try {
@@ -161,16 +159,16 @@ if (-not $reportData -or $reportData.Count -eq 0) {
 else {
     # Calculate summary statistics
     $totalAccounts = $reportData.Count
-    $accountsOverThreshold = ($reportData | Where-Object { $_.CurrentLag -gt $ThresholdMinutes }).Count
+    $accountsOverThreshold = ($reportData | Where-Object { $_.MaxLag -gt $ThresholdMinutes }).Count
     $accountsOverThresholdPercent = [math]::Round(($accountsOverThreshold * 100.0 / $totalAccounts), 1)
-    $avgLagAcrossAll = [math]::Round(($reportData | Measure-Object -Property CurrentLag -Average).Average, 2)
+    $avgLagAcrossAll = [math]::Round(($reportData | Measure-Object -Property AvgLag -Average).Average, 2)
     $maxLagAcrossAll = [math]::Round(($reportData | Measure-Object -Property MaxLag -Maximum).Maximum, 2)
     $totalOverThresholdEvents = ($reportData | Measure-Object -Property TimesOverThreshold -Sum).Sum
 
     Write-Host "Summary Statistics:"
     Write-Host "  - Total Accounts: $totalAccounts"
-    Write-Host "  - Accounts Over Threshold: $accountsOverThreshold ($accountsOverThresholdPercent%)"
-    Write-Host "  - Average Lag (Current): $avgLagAcrossAll minutes"
+    Write-Host "  - Accounts with Max Lag Over Threshold: $accountsOverThreshold ($accountsOverThresholdPercent%)"
+    Write-Host "  - Average Lag (7 days): $avgLagAcrossAll minutes"
     Write-Host "  - Max Lag (7 days): $maxLagAcrossAll minutes"
     Write-Host "  - Total Over-Threshold Events: $totalOverThresholdEvents"
 
@@ -193,11 +191,11 @@ else {
     <td><strong>$totalAccounts</strong></td>
   </tr>
   <tr>
-    <td>Accounts Currently Over Threshold</td>
+    <td>Accounts with Max Lag Over Threshold (Last 7 Days)</td>
     <td><strong style="color: #ff0000;">$accountsOverThreshold ($accountsOverThresholdPercent%)</strong></td>
   </tr>
   <tr>
-    <td>Average Current Lag (All Accounts)</td>
+    <td>Average Lag (Last 7 Days - All Accounts)</td>
     <td><strong>$avgLagAcrossAll minutes</strong></td>
   </tr>
   <tr>
@@ -217,7 +215,6 @@ else {
     # Build detailed table
     $tableRows = ""
     foreach ($account in $reportData) {
-        $currentLag = if ($account.CurrentLag) { [math]::Round([double]$account.CurrentLag, 2) } else { 0.0 }
         $maxLag = if ($account.MaxLag) { [math]::Round([double]$account.MaxLag, 2) } else { 0.0 }
         $avgLag = if ($account.AvgLag) { [math]::Round([double]$account.AvgLag, 2) } else { 0.0 }
         $minLag = if ($account.MinLag) { [math]::Round([double]$account.MinLag, 2) } else { 0.0 }
@@ -228,31 +225,31 @@ else {
         $currentStatus = if ($account.CurrentStatus) { $account.CurrentStatus } else { "N/A" }
         $lastSyncTime = if ($account.LastSyncTime) { $account.LastSyncTime } else { "N/A" }
 
-        # Determine row highlighting
+        # Determine row highlighting based on MaxLag
         $rowStyle = ""
-        if ($currentLag -gt $threshold) {
+        if ($maxLag -gt $threshold) {
             $rowStyle = " style='background-color:#ffcccc;'"
         }
-        elseif ($currentLag -gt 0) {
+        elseif ($maxLag -gt 0) {
             $rowStyle = " style='background-color:#fff4cc;'"
         }
 
         # Format lag values with color
-        $currentLagDisplay = if ($currentLag -gt $threshold) {
-            "<strong style='color:#ff0000;'>$currentLag</strong>"
-        }
-        elseif ($currentLag -gt 0) {
-            "<span style='color:#ff8800;'>$currentLag</span>"
-        }
-        else {
-            "<span style='color:#00aa00;'>$currentLag</span>"
-        }
-
         $maxLagDisplay = if ($maxLag -gt $threshold) {
             "<strong style='color:#ff0000;'>$maxLag</strong>"
         }
+        elseif ($maxLag -gt 0) {
+            "<span style='color:#ff8800;'>$maxLag</span>"
+        }
         else {
-            "$maxLag"
+            "<span style='color:#00aa00;'>$maxLag</span>"
+        }
+
+        $avgLagDisplay = if ($avgLag -gt $threshold) {
+            "<span style='color:#ff8800;'>$avgLag</span>"
+        }
+        else {
+            "$avgLag"
         }
 
         $subscriptionId = if ($account.SubscriptionId) { $account.SubscriptionId } else { "N/A" }
@@ -269,9 +266,8 @@ else {
                      "<td>$skuName</td>" +
                      "<td>$currentStatus</td>" +
                      "<td>$lastSyncTime</td>" +
-                     "<td>$currentLagDisplay</td>" +
                      "<td>$maxLagDisplay</td>" +
-                     "<td>$avgLag</td>" +
+                     "<td>$avgLagDisplay</td>" +
                      "<td>$minLag</td>" +
                      "<td>$timesOverThreshold / $totalChecks</td>" +
                      "<td>$percentOverThreshold%</td>" +
@@ -289,7 +285,6 @@ else {
     <th>SKU</th>
     <th>Geo Status</th>
     <th>Last Sync Time</th>
-    <th>Current Lag (min)</th>
     <th>Max Lag (7d) (min)</th>
     <th>Avg Lag (7d) (min)</th>
     <th>Min Lag (7d) (min)</th>
