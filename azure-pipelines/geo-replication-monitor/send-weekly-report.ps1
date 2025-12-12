@@ -103,21 +103,55 @@ try {
     
     $queryResult = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspaceId -Timespan $timespan -Query $kqlQuery -ErrorAction Stop
     
-    # Extract results - the cmdlet returns results directly as objects
-    if ($queryResult -and $queryResult.Results) {
-        $reportData = $queryResult.Results
-        Write-Host "Query returned $($reportData.Count) storage accounts"
-    }
-    elseif ($queryResult) {
-        Write-Host "Query completed but no results. QueryResult type: $($queryResult.GetType().Name)"
-        if ($queryResult | Get-Member -MemberType Property) {
-            Write-Host "QueryResult properties: $($queryResult | Get-Member -MemberType Property | Select-Object -ExpandProperty Name -Join ', ')"
-        }
-        $reportData = @()
+    # Initialize reportData
+    $reportData = @()
+    
+    # Debug: Check the structure of the result
+    if ($null -eq $queryResult) {
+        Write-Warning "Query returned null result."
     }
     else {
-        Write-Warning "No data returned from Log Analytics query."
-        $reportData = @()
+        Write-Host "QueryResult type: $($queryResult.GetType().FullName)"
+        
+        # Check if queryResult is an array (shouldn't be, but handle it)
+        if ($queryResult -is [Array]) {
+            Write-Host "QueryResult is an array with $($queryResult.Count) items"
+            $reportData = @($queryResult)
+        }
+        else {
+            # Check for properties
+            $memberInfo = $queryResult | Get-Member -MemberType Property -ErrorAction SilentlyContinue
+            if ($memberInfo) {
+                $properties = $memberInfo | Select-Object -ExpandProperty Name
+                Write-Host "QueryResult properties: $($properties -Join ', ')"
+            }
+            
+            # Check for errors first
+            if ($queryResult.PSObject.Properties['Error'] -and $queryResult.Error) {
+                Write-Warning "Query returned an error: $($queryResult.Error)"
+            }
+            # Extract results - the cmdlet returns results in the Results property
+            elseif ($queryResult.PSObject.Properties['Results']) {
+                $results = $queryResult.Results
+                if ($null -ne $results) {
+                    $reportData = @($results)
+                    try {
+                        $count = $reportData.Count
+                        Write-Host "Query returned $count storage accounts"
+                    }
+                    catch {
+                        Write-Host "Query returned results (count check failed: $_)"
+                    }
+                }
+                else {
+                    Write-Warning "Results property is null."
+                }
+            }
+            else {
+                Write-Warning "QueryResult does not have a Results property. Using queryResult directly."
+                $reportData = @($queryResult)
+            }
+        }
     }
 }
 catch {
@@ -127,7 +161,27 @@ catch {
     throw
 }
 
-if (-not $reportData -or $reportData.Count -eq 0) {
+# Ensure reportData is always an array
+if ($null -eq $reportData) {
+    $reportData = @()
+}
+
+# Safely check count
+$reportDataCount = 0
+try {
+    if ($reportData -is [Array]) {
+        $reportDataCount = $reportData.Count
+    }
+    elseif ($reportData) {
+        $reportDataCount = 1
+    }
+}
+catch {
+    Write-Warning "Error getting reportData count: $_"
+    $reportDataCount = 0
+}
+
+if ($reportDataCount -eq 0) {
     Write-Host "No geo-replicated storage accounts found in Log Analytics for the last 7 days."
     Write-Host "Sending empty report notification."
     
@@ -142,7 +196,7 @@ if (-not $reportData -or $reportData.Count -eq 0) {
 }
 else {
     # Calculate summary statistics
-    $totalAccounts = $reportData.Count
+    $totalAccounts = $reportDataCount
     $accountsOverThreshold = ($reportData | Where-Object { $_.MaxLag -gt $ThresholdMinutes }).Count
     $accountsOverThresholdPercent = [math]::Round(($accountsOverThreshold * 100.0 / $totalAccounts), 1)
     $avgLagAcrossAll = [math]::Round(($reportData | Measure-Object -Property AvgLag -Average).Average, 2)
