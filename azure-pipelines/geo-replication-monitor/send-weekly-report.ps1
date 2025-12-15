@@ -134,7 +134,9 @@ try {
             elseif ($queryResult.PSObject.Properties['Results']) {
                 $results = $queryResult.Results
                 if ($null -ne $results) {
-                    $reportData = @($results)
+                    # Results is already an array of rows (one per storage account)
+                    # Do NOT wrap it in @(), or you'll end up with a nested array
+                    $reportData = $results
                     try {
                         $count = $reportData.Count
                         Write-Host "Query returned $count storage accounts"
